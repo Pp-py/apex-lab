@@ -15,3 +15,4 @@ cache/
 # Si un proyecto concreto SÍ quiere versionar sus semillas, que lo haga en el
 # repo de ese proyecto, no acá.
 init/
+.claude/settings.local.json

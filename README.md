@@ -267,12 +267,6 @@ build limpio en 6 m 58 s, APEX 26.1 `VALID` con 0 objetos inválidos, el Builder
 sirviendo sus estáticos, correo cayendo en Mailpit y las ACLs de red
 funcionando desde un esquema de aplicación.
 
-La corrida destapó siete bugs, ninguno detectable sin ejecutar —desde un
-`docker cp` que dejaba los archivos con un uid ajeno hasta `DBMS_OUTPUT`
-descartándose en silencio por el orden de `SERVEROUTPUT`. Están todos
-documentados, con su causa y su fix, en
-[`docs/validacion-e2e.md`](docs/validacion-e2e.md).
-
-Lo único que sigue **sin ejercitar** es el perfil `oracle` de
-`scripts/base-profile.sh`: es el plan B, no el camino principal. Cuando lo
+El plan B de la imagen oficial sigue **sin ejercitar** es el perfil `oracle` de
+`scripts/base-profile.sh`: es fallback, no el camino principal. Cuando lo
 necesites, esperá tener que ajustar algún detalle.
