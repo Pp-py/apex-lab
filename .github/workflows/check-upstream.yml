@@ -1,0 +1,101 @@
+# ---------------------------------------------------------------------------
+# check-upstream.yml
+#
+# Este repo NO construye la imagen en CI: son ~20 GB de trabajo y los runners
+# de GitHub tienen ~14 GB de disco. La imagen se construye en tu máquina.
+#
+# Lo que sí automatiza CI es lo que se olvida en la práctica: enterarse de que
+# salió una versión nueva. Corre una vez por mes y abre un issue si algo cambió
+# respecto de versions.env.
+# ---------------------------------------------------------------------------
+name: Vigilar versiones upstream
+
+on:
+  schedule:
+    - cron: "0 12 1 * *"   # día 1 de cada mes, 12:00 UTC
+  workflow_dispatch:
+  push:
+    paths:
+      - "**.sh"
+      - ".github/workflows/check-upstream.yml"
+  pull_request:
+    paths:
+      - "**.sh"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  # El build no corre en CI (~20 GB, los runners tienen ~14), pero el lint de
+  # shell sí: es lo único automatizable de este repo y los `# shellcheck source=`
+  # del código ya asumían un lint que nunca se configuró.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: shellcheck
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          # -x sigue los `source` para que resuelva scripts/base-profile.sh.
+          shellcheck -x build.sh scripts/*.sh
+
+      - name: Sintaxis de los .sh restantes
+        run: bash -n build.sh scripts/*.sh
+
+  check:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Comparar versiones fijadas contra upstream
+        id: check
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          source versions.env
+
+          findings=""
+
+          # --- Imagen base de la BD ---------------------------------------
+          # Tags con formato 23.YY.N (el esquema de 3 dígitos vigente).
+          latest_db=$(curl -fsSL \
+            "https://hub.docker.com/v2/repositories/gvenzl/oracle-free/tags?page_size=100" \
+            | grep -oE '"name":"23\.[0-9]+\.[0-9]+-full-faststart"' \
+            | sed 's/.*:"//;s/"//' | sort -V | tail -1 || true)
+          current_db="${DB_BASE_IMAGE#*:}"
+          if [[ -n "${latest_db}" && "${latest_db}" != "${current_db}" ]]; then
+            findings+="- Imagen base: fijada \`${current_db}\`, disponible \`${latest_db}\`"$'\n'
+          fi
+
+          # --- APEX --------------------------------------------------------
+          # No hay API de versión: se compara el Last-Modified de apex-latest.zip
+          # contra el del zip fijado. Si difieren, hay release nuevo o re-release.
+          lm_latest=$(curl -fsSLI "https://download.oracle.com/otn_software/apex/apex-latest.zip" \
+            | grep -i '^last-modified:' | tr -d '\r' | cut -d' ' -f2- || true)
+          lm_pinned=$(curl -fsSLI "${APEX_URL}" \
+            | grep -i '^last-modified:' | tr -d '\r' | cut -d' ' -f2- || true)
+          if [[ -n "${lm_latest}" && "${lm_latest}" != "${lm_pinned}" ]]; then
+            findings+="- APEX: \`apex-latest.zip\` (${lm_latest}) difiere de la versión fijada ${APEX_VERSION} (${lm_pinned}). Puede ser release nuevo o re-release del mismo (ojo: el SHA256 cambia)."$'\n'
+          fi
+
+          if [[ -z "${findings}" ]]; then
+            echo "Todo al día."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            { echo 'body<<EOF'; echo "${findings}"; echo 'EOF'; } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Abrir issue
+        if: steps.check.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BODY: ${{ steps.check.outputs.body }}
+        run: |
+          gh issue create \
+            --title "Actualizaciones upstream disponibles ($(date +%Y-%m))" \
+            --body "$(printf 'Detectado por el workflow mensual:\n\n%s\n\nPasos: actualizar `versions.env`, vaciar `APEX_SHA256`, correr `./build.sh` y fijar el hash nuevo.\n\nAntes de subir de versión de APEX, revisar los requisitos de ORDS y de BD en las release notes.' "$BODY")"

@@ -1,0 +1,17 @@
+# Instaladores descargados y extraídos (varios GB, se re-descargan solos)
+cache/
+
+# Descargas interrumpidas de curl (fetch_apex escribe .part antes del mv)
+*.part
+
+# Configuración local por proyecto. La genera ./build.sh desde .env.example;
+# contiene puertos y nombre de proyecto propios de tu máquina.
+.env
+
+# Semillas del proyecto. NO se versiona: acá viven el DDL, los datos de prueba
+# y las credenciales de cada proyecto, y un `git add -A` distraído los subiría.
+# La plantilla versionada es init.example/; ./build.sh siembra init/ desde ahí.
+#
+# Si un proyecto concreto SÍ quiere versionar sus semillas, que lo haga en el
+# repo de ese proyecto, no acá.
+init/

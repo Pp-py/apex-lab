@@ -1,0 +1,83 @@
+# ---------------------------------------------------------------------------
+# compose.yml — Stack de desarrollo APEX.
+#
+# El nombre del proyecto define los volúmenes, así que cada proyecto nuevo es
+# un entorno aislado sobre la MISMA imagen:
+#
+#     COMPOSE_PROJECT_NAME=proyecto-x docker compose up -d
+#     COMPOSE_PROJECT_NAME=proyecto-x docker compose down -v   # borra todo
+#
+# El .env lo genera ./build.sh la primera vez (y valida en cada corrida que el
+# bloque derivado siga coincidiendo con versions.env).
+# ---------------------------------------------------------------------------
+name: ${COMPOSE_PROJECT_NAME:-apexlab}
+
+services:
+
+  # -------------------------------------------------------------------------
+  # Base de datos con APEX ya instalado (imagen generada por ./build.sh)
+  # -------------------------------------------------------------------------
+  db:
+    image: ${APEX_DB_IMAGE:-apex-lab:latest}
+    container_name: ${COMPOSE_PROJECT_NAME:-apexlab}-db
+    restart: unless-stopped
+    # La SGA vive en /dev/shm. Con el default de 64 MB la instancia no arranca.
+    shm_size: 2gb
+    ports:
+      - "${DB_PORT:-1521}:1521"
+    volumes:
+      # Primer `up`: Docker copia los datafiles (~4,5 GB) de la imagen al
+      # volumen. Solo pasa una vez por proyecto. A cambio, los cambios de
+      # esquema (y la instalación de ORDS) sobreviven a `down` sin `-v`.
+      - oradata:/opt/oracle/oradata
+      # Semillas del proyecto: se ejecutan como SYS contra la CDB, UNA SOLA VEZ,
+      # en el primer arranque del volumen. Ver init.example/README.md.
+      # La ruta depende de la imagen base (ver DB_IMAGE_PROFILE en versions.env).
+      - ./init:${DB_INITDB_DIR:-/container-entrypoint-initdb.d}:ro
+    healthcheck:
+      test: ["CMD", "${DB_HEALTHCHECK_CMD:-healthcheck.sh}"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  # -------------------------------------------------------------------------
+  # ORDS oficial de Oracle. No se hornea: se actualiza cambiando el tag.
+  # -------------------------------------------------------------------------
+  ords:
+    image: container-registry.oracle.com/database/ords:${ORDS_TAG:-26.1.2}
+    container_name: ${COMPOSE_PROJECT_NAME:-apexlab}-ords
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DBHOST: db
+      DBPORT: 1521
+      DBSERVICENAME: FREEPDB1
+      ORACLE_PWD: ${ORACLE_PASSWORD:-oracle}
+      ORDS_PWD: ${ORACLE_PASSWORD:-oracle}
+    volumes:
+      # Estáticos de APEX (/i/). Salen del instalador que ya descargó build.sh.
+      - ./cache/apex:/opt/oracle/apex:ro
+      # Config de ORDS persistente: sin esto reinstala en cada arranque.
+      - ords_config:/etc/ords/config
+    ports:
+      - "${ORDS_PORT:-8080}:8080"
+
+  # -------------------------------------------------------------------------
+  # Mailpit: captura TODO el correo saliente. Nada sale a internet.
+  # -------------------------------------------------------------------------
+  mail:
+    image: axllent/mailpit:latest
+    container_name: ${COMPOSE_PROJECT_NAME:-apexlab}-mail
+    restart: unless-stopped
+    ports:
+      - "${MAILPIT_PORT:-8025}:8025"   # UI web
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+
+volumes:
+  oradata:
+  ords_config:
