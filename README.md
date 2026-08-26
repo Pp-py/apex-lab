@@ -175,7 +175,27 @@ Están **horneadas en la imagen** (`versions.env` → `BUILD_*`). Es un entorno
 local desechable, no un servidor: la decisión es DELIBERADA, a cambio de que
 `docker compose up` funcione sin pasos manuales.
 
-Tres consecuencias:
+### Cambiarlas
+
+Se cambian en `versions.env`, **nunca en `.env`**: ese lo genera `build.sh` y si
+lo editás a mano el build aborta por divergencia.
+
+```bash
+# Opción A — editar versions.env y correr ./build.sh. Sin fricción, pero
+# la contraseña queda en el repo.
+
+# Opción B — por entorno, para no versionarla:
+BUILD_ORACLE_PASSWORD='...' BUILD_APEX_ADMIN_PASSWORD='...' ./build.sh
+```
+
+Con la opción B hay que exportar las variables **en cada corrida** de
+`build.sh`: si las omitís, `versions.env` vuelve a sus defaults, el `.env` queda
+divergente y el build corta indicando la línea. Para saltear ese chequeo,
+`ALLOW_ENV_DRIFT=1 ./build.sh`.
+
+Cualquiera de las dos exige rebuild: las contraseñas viven dentro de la imagen.
+
+### Tres consecuencias
 
 - No pongas ahí **ninguna contraseña** que uses en otro lado.
 - Las contraseñas viajan a los `.sql` por sustitución de SQL*Plus, así que
