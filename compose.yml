@@ -24,7 +24,11 @@ services:
     # La SGA vive en /dev/shm. Con el default de 64 MB la instancia no arranca.
     shm_size: 2gb
     ports:
-      - "${DB_PORT:-1521}:1521"
+      # BIND_ADDR es 127.0.0.1 por defecto a propósito: las credenciales de este
+      # entorno son públicas (viven en versions.env) y APEX corre sin HTTPS.
+      # Publicar en 0.0.0.0 deja la base y el Builder al alcance de cualquiera
+      # en tu red. Ver la nota en .env.example antes de cambiarlo.
+      - "${BIND_ADDR:-127.0.0.1}:${DB_PORT:-1521}:1521"
     volumes:
       # Primer `up`: Docker copia los datafiles (~4,5 GB) de la imagen al
       # volumen. Solo pasa una vez por proyecto. A cambio, los cambios de
@@ -63,7 +67,7 @@ services:
       # Config de ORDS persistente: sin esto reinstala en cada arranque.
       - ords_config:/etc/ords/config
     ports:
-      - "${ORDS_PORT:-8080}:8080"
+      - "${BIND_ADDR:-127.0.0.1}:${ORDS_PORT:-8080}:8080"
 
   # -------------------------------------------------------------------------
   # Mailpit: captura TODO el correo saliente. Nada sale a internet.
@@ -73,7 +77,7 @@ services:
     container_name: ${COMPOSE_PROJECT_NAME:-apexlab}-mail
     restart: unless-stopped
     ports:
-      - "${MAILPIT_PORT:-8025}:8025"   # UI web
+      - "${BIND_ADDR:-127.0.0.1}:${MAILPIT_PORT:-8025}:8025"   # UI web
     environment:
       MP_SMTP_AUTH_ACCEPT_ANY: 1
       MP_SMTP_AUTH_ALLOW_INSECURE: 1

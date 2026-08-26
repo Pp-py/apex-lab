@@ -136,6 +136,10 @@ adentro.
   manuales. Nunca poner ahí una contraseña que se use en otro lado. `build.sh`
   rechaza contraseñas con `&`, comillas, `\`, `$` o espacios: romperían la
   sustitución de SQL*Plus.
+- **Los puertos se publican en `127.0.0.1` por defecto** (`BIND_ADDR` en `.env`).
+  No es paranoia: las credenciales están en el repo público y APEX corre sin
+  HTTPS, así que un `0.0.0.0` deja la base y el Builder abiertos a toda la red
+  local. Si alguna vez lo abrís para una demo, volvelo a loopback después.
 - **`sql/20_network_acl.sql` usa `host => '*'`.** Correcto en un entorno local
   aislado, **incorrecto en cualquier otro lado**. No copiar a un servidor
   compartido.

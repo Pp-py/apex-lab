@@ -190,6 +190,21 @@ Las ACLs de red se otorgan con `host => '*'` (ver `sql/20_network_acl.sql`).
 Es lo correcto en un **entorno local** aislado y lo incorrecto en cualquier otro
 lado — no copiar ese script a un servidor compartido.
 
+### Por qué los puertos escuchan solo en localhost
+
+Como las credenciales son públicas y APEX corre sin HTTPS, el stack publica sus
+puertos en `127.0.0.1` y no en `0.0.0.0`. Sin eso, cualquiera en tu red llega a
+`system/<pass>@tu-ip:1521` y al Builder como `ADMIN` — en un coworking o la wifi
+de un café eso es un problema real, no teórico.
+
+Para abrirlo a propósito (mostrarle la app a alguien en la misma red):
+
+```bash
+sed -i 's/^BIND_ADDR=.*/BIND_ADDR=0.0.0.0/' .env && docker compose up -d
+```
+
+Y volvé a `127.0.0.1` cuando termines.
+
 ---
 
 ## Distribución
