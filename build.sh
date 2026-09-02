@@ -17,7 +17,8 @@
 #
 set -Eeuo pipefail
 
-readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
 readonly CACHE_DIR="${SCRIPT_DIR}/cache"
 readonly BUILD_CONTAINER="apex-lab-build"
 readonly APEX_INSTALL_TIMEOUT=3600
