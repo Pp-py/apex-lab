@@ -72,14 +72,24 @@ jobs:
           fi
 
           # --- APEX --------------------------------------------------------
-          # No hay API de versión: se compara el Last-Modified de apex-latest.zip
-          # contra el del zip fijado. Si difieren, hay release nuevo o re-release.
-          lm_latest=$(curl -fsSLI "https://download.oracle.com/otn_software/apex/apex-latest.zip" \
-            | grep -i '^last-modified:' | tr -d '\r' | cut -d' ' -f2- || true)
-          lm_pinned=$(curl -fsSLI "${APEX_URL}" \
-            | grep -i '^last-modified:' | tr -d '\r' | cut -d' ' -f2- || true)
-          if [[ -n "${lm_latest}" && "${lm_latest}" != "${lm_pinned}" ]]; then
-            findings+="- APEX: \`apex-latest.zip\` (${lm_latest}) difiere de la versión fijada ${APEX_VERSION} (${lm_pinned}). Puede ser release nuevo o re-release del mismo (ojo: el SHA256 cambia)."$'\n'
+          # No hay API de versión: se compara el tamaño de apex-latest.zip
+          # contra el del zip fijado. Mientras no haya release nuevo son dos
+          # rutas al mismo archivo y el tamaño coincide.
+          #
+          # Antes se comparaba Last-Modified, y eso daba positivo SIEMPRE:
+          # Oracle publica cada ruta por separado (en 26.1, 11:25 y 13:05 del
+          # mismo día), así que las fechas no coinciden aunque el zip sea
+          # idéntico. El check anunciaba un release nuevo en cada corrida.
+          apex_size() {
+            curl -fsSLI "$1" | grep -i '^content-length:' | tr -d '\r' \
+              | awk '{print $2}' | tail -1
+          }
+          size_latest=$(apex_size "https://download.oracle.com/otn_software/apex/apex-latest.zip" || true)
+          size_pinned=$(apex_size "${APEX_URL}" || true)
+          if [[ -z "${size_pinned}" ]]; then
+            findings+="- APEX: no se pudo leer \`${APEX_URL}\`. Puede que Oracle haya retirado el zip de ${APEX_VERSION}."$'\n'
+          elif [[ -n "${size_latest}" && "${size_latest}" != "${size_pinned}" ]]; then
+            findings+="- APEX: \`apex-latest.zip\` pesa ${size_latest} bytes y el zip fijado de ${APEX_VERSION} pesa ${size_pinned}. Hay release nuevo o re-release (ojo: el SHA256 cambia)."$'\n'
           fi
 
           if [[ -z "${findings}" ]]; then
@@ -90,12 +100,35 @@ jobs:
             { echo 'body<<EOF'; echo "${findings}"; echo 'EOF'; } >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Abrir issue
+      # El workflow corre todos los meses y los hallazgos suelen seguir
+      # pendientes. Sin buscar primero, cada corrida abría otro issue por lo
+      # mismo, y como el título lleva el mes ni siquiera colisionaban.
+      - name: Abrir o actualizar el issue
         if: steps.check.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BODY: ${{ steps.check.outputs.body }}
         run: |
-          gh issue create \
-            --title "Actualizaciones upstream disponibles ($(date +%Y-%m))" \
-            --body "$(printf 'Detectado por el workflow mensual:\n\n%s\n\nPasos: actualizar `versions.env`, vaciar `APEX_SHA256`, correr `./build.sh` y fijar el hash nuevo.\n\nAntes de subir de versión de APEX, revisar los requisitos de ORDS y de BD en las release notes.' "$BODY")"
+          set -Eeuo pipefail
+
+          existing=$(gh issue list --state open --limit 100 --json number,title \
+            --jq '[.[] | select(.title | startswith("Actualizaciones upstream disponibles"))][0].number // empty')
+
+          if [[ -z "${existing}" ]]; then
+            gh issue create \
+              --title "Actualizaciones upstream disponibles ($(date +%Y-%m))" \
+              --body "$(printf 'Detectado por el workflow mensual:\n\n%s\n\nPasos: actualizar `versions.env`, vaciar `APEX_SHA256`, correr `./build.sh` y fijar el hash nuevo.\n\nAntes de subir de versión de APEX, revisar los requisitos de ORDS y de BD en las release notes.' "$BODY")"
+            exit 0
+          fi
+
+          # Ya hay uno abierto. Si dice exactamente esto, no tiene sentido
+          # comentar todos los meses: solo avisamos cuando el hallazgo cambia.
+          last=$(gh issue view "${existing}" --json body,comments \
+            --jq '(.comments | last | .body) // .body' | tr -d '\r')
+          if [[ "${last}" == *"${BODY}"* ]]; then
+            echo "El issue #${existing} ya reporta esto mismo; no comento."
+            exit 0
+          fi
+
+          gh issue comment "${existing}" \
+            --body "$(printf 'Corrida del %s, cambió lo detectado:\n\n%s' "$(date -u +%F)" "$BODY")"
