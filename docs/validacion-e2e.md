@@ -65,6 +65,49 @@ abre, pero sin el `datapatch` que le corresponde. En un entorno desechable la
 respuesta es destruir el volumen; si algún día no lo es, hay que sacar un dump
 antes.
 
+### Bug #8: los scripts de `init/` nunca se habían ejecutado
+
+Lo destapó la primera corrida que de verdad los puso a prueba, el 03/09/2026.
+**No es un bug de los scripts: era un bug del contrato**, y el repo lo
+documentaba al revés en tres lugares (`compose.yml`, `init.example/README.md` y
+la sección de trampas de `CLAUDE.md`).
+
+La cadena:
+
+1. El entrypoint corre `container-entrypoint-initdb.d` **solo** dentro de la
+   rama "la base no existe", y lo decide con
+   `[ -d ${ORACLE_BASE}/oradata/dbconfig/${ORACLE_SID} ]`.
+2. Esta imagen sale de un `-faststart` + `docker commit`, así que
+   `/opt/oracle/oradata/dbconfig/FREE` **viaja dentro de la imagen**.
+3. En el primer `up`, Docker copia ese directorio al volumen recién creado junto
+   con los datafiles.
+4. El entrypoint lo encuentra, marca `DATABASE_ALREADY_EXISTS=true`, loguea
+   `CONTAINER: database already initialized` y saltea `initdb.d`.
+
+O sea: **con esta imagen, `initdb.d` no corre nunca**, ni con un volumen vacío.
+El e2e original no lo detectó porque nunca hubo un script ahí: la receta de la
+ACL de esquema se verificó ejecutando el SQL a mano.
+
+Arreglado montando `./init` en `container-entrypoint-startdb.d`, que corre en
+cada arranque fuera de ese condicional (`DB_SEED_DIR` en `base-profile.sh`).
+La contrapartida es que **las semillas tienen que ser idempotentes**; el
+beneficio es que editar el `.env` y reiniciar alcanza para que tomen efecto, sin
+destruir el volumen.
+
+Verificado después del arreglo: volumen vacío → los tres scripts corren solos y
+crean workspace, esquema, usuario y ACL; segundo arranque → los tres reportan
+`ya existia`; `APP_PASSWORD` cambiado en el `.env` → la clave del esquema queda
+resincronizada y la vieja pasa a dar `ORA-01017`.
+
+Dos detalles del entrypoint que salieron de leerlo:
+
+- Solo ejecuta `*.sh`, `*.sql`, `*.sql.zip` y `*.sql.gz`; el resto lo loguea
+  como `ignoring`. Por eso las plantillas de `init.example/` llevan sufijo
+  `.example` y quedan inertes hasta que se las renombra.
+- **Ejecuta** los `.sh` con bit de ejecución y **sourcea** los que no lo tienen,
+  y su rama de sourcing tiene un bug de upstream: le falta un `;`, así que le
+  pasa el `echo` siguiente como argumento al script.
+
 ### Dos trampas al verificar, no del entorno
 
 - **`apex_mail_queue` filtra por workspace.** En una sesión sin
