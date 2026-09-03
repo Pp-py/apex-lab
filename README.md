@@ -5,7 +5,7 @@ cada vez que sale una versión nueva; después, cada proyecto arranca en segundo
 
 | Componente | Versión | Cómo se actualiza |
 |---|---|---|
-| Oracle Database Free | 23.26.2 (`gvenzl/oracle-free`) | `versions.env` + `./build.sh` |
+| Oracle Database Free | 23.26.3 (`gvenzl/oracle-free`) | `versions.env` + `./build.sh` |
 | Oracle APEX | 26.1 | `versions.env` + `./build.sh` |
 | ORDS | 26.1.2 (imagen oficial) | solo cambiar el tag, sin rebuild |
 | Mailpit | latest | — |

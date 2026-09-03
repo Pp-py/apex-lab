@@ -13,7 +13,7 @@ arranca en segundos sobre esa misma imagen.
 
 | Componente | Versión | Se actualiza |
 |---|---|---|
-| Oracle Database Free | 23.26.2 (`gvenzl/oracle-free`) | `versions.env` + `./build.sh` |
+| Oracle Database Free | 23.26.3 (`gvenzl/oracle-free`) | `versions.env` + `./build.sh` |
 | Oracle APEX | 26.1 | `versions.env` + `./build.sh` |
 | ORDS | 26.1.2 (imagen oficial) | solo el tag, sin rebuild |
 | Mailpit | latest | — |
