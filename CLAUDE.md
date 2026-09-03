@@ -51,6 +51,7 @@ scripts/base-profile.sh   convenciones por imagen base (se sourcea, no se ejecut
 scripts/install-apex.sh   corre DENTRO del contenedor de build
 sql/                      post-configuración de APEX, se copia al contenedor
 init.example/             plantilla de semillas; build.sh siembra ./init (no versionado)
+apps.example/             donde van las apps exportadas; ./apps no se versiona
 docs/                     registro de la validación end-to-end
 ```
 

@@ -15,4 +15,12 @@ cache/
 # Si un proyecto concreto SÍ quiere versionar sus semillas, que lo haga en el
 # repo de ese proyecto, no acá.
 init/
+
+# Apps de APEX exportadas (formato APEXlang o cualquier otro). Mismo criterio
+# que init/: son el codigo de TU aplicacion, no del entorno, y ademas arrastran
+# los static files binarios, que no diffean. La plantilla versionada que explica
+# donde van y como exportarlas es apps.example/.
+#
+# Si una app SI quiere versionarse, va en el repo de esa app, no aca.
+apps/
 .claude/settings.local.json

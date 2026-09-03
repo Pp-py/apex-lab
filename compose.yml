@@ -74,6 +74,11 @@ services:
       DBSERVICENAME: FREEPDB1
       ORACLE_PWD: ${ORACLE_PASSWORD:-oracle}
       ORDS_PWD: ${ORACLE_PASSWORD:-oracle}
+      # SQLcl vive en ESTE contenedor, no en el de la base, y es lo que corre
+      # `apex export`. Sin estas dos, el comando documentado en
+      # apps.example/README.md conecta sin usuario y da ORA-01017.
+      APP_SCHEMA: ${APP_SCHEMA}
+      APP_PASSWORD: ${APP_PASSWORD}
     volumes:
       # Estáticos de APEX (/i/). Salen del instalador que ya descargó build.sh.
       - ./cache/apex:/opt/oracle/apex:ro

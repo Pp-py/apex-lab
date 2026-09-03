@@ -45,6 +45,7 @@ sql/
 ├── 10_apex_instance.sql    cuenta ADMIN, SMTP, parámetros de instancia
 └── 20_network_acl.sql      ACLs de red del engine de APEX
 init.example/               plantilla de semillas; build.sh siembra ./init (no versionado)
+apps.example/               donde van las apps exportadas; ./apps no se versiona
 docs/                       registro de la validación end-to-end
 .github/workflows/          vigilancia de versiones upstream + shellcheck
 ```
@@ -97,6 +98,31 @@ tu aplicación, que el build **no** cubre: sin ella, cualquier llamada saliente
 desde tu propio PL/SQL falla con `ORA-29273`.
 
 → [`init.example/README.md`](init.example/README.md)
+
+### Apps exportadas
+
+Las apps de APEX exportadas van en `./apps/`, una carpeta por app. **Tampoco se
+versiona acá** (mismo criterio que `init/`): son el código de tu aplicación, no
+del entorno, y arrastran los static files binarios, que no diffean.
+
+El formato recomendado es **APEXlang** (`-exptype APEXLANG`): un DSL declarativo
+con un archivo por componente, en vez de un único `f100.sql` de
+`wwv_flow_api.create_*`. Cambiar el título de una página toca una línea y nada
+más.
+
+```bash
+docker exec -i apexlab-ords bash -c '
+  rm -rf /tmp/apexlang && mkdir -p /tmp/apexlang && cd /tmp/apexlang
+  echo -e "apex export -applicationid 100 -exptype APEXLANG\nexit" \
+    | sql -s $APP_SCHEMA/$APP_PASSWORD@db:1521/FREEPDB1'
+
+mkdir -p apps && docker cp apexlab-ords:/tmp/apexlang/<alias> apps/<alias>
+```
+
+Ojo con un detalle que no se adivina: **SQLcl está en el contenedor de ORDS, no
+en el de la base.** Y ahí la base se llama `db`, no `localhost`.
+
+→ [`apps.example/README.md`](apps.example/README.md)
 
 ---
 
