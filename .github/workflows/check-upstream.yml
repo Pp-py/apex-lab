@@ -72,24 +72,55 @@ jobs:
           fi
 
           # --- APEX --------------------------------------------------------
-          # No hay API de versión: se compara el tamaño de apex-latest.zip
-          # contra el del zip fijado. Mientras no haya release nuevo son dos
-          # rutas al mismo archivo y el tamaño coincide.
+          # No hay API de versión, así que se compara el zip fijado contra
+          # apex-latest.zip: mientras no haya release nuevo, son dos rutas al
+          # MISMO archivo.
           #
-          # Antes se comparaba Last-Modified, y eso daba positivo SIEMPRE:
-          # Oracle publica cada ruta por separado (en 26.1, 11:25 y 13:05 del
-          # mismo día), así que las fechas no coinciden aunque el zip sea
-          # idéntico. El check anunciaba un release nuevo en cada corrida.
-          apex_size() {
-            curl -fsSLI "$1" | grep -i '^content-length:' | tr -d '\r' \
-              | awk '{print $2}' | tail -1
+          # La huella es el ETag del CDN, pero solo su primera mitad. Oracle
+          # sirve `<hash-del-contenido>:<timestamp-de-publicación>` y publica
+          # cada ruta por separado (en 26.1: 11:25 y 13:05 del mismo día), así
+          # que el timestamp NUNCA coincide aunque el zip sea idéntico. Por eso
+          # el check original, que comparaba Last-Modified, anunciaba un
+          # release nuevo en cada corrida.
+          #
+          # Si el CDN dejara de mandar ETag se cae a Content-Length, que
+          # detecta el release nuevo igual pero se le escaparía un re-release
+          # del mismo peso.
+          hdr_last() {
+            # Con -L hay varios bloques de cabeceras: vale la última aparición.
+            # El `|| true` es para que un grep sin match no aborte por pipefail.
+            grep -i "^$2:" <<<"$1" | tr -d '\r"' | awk '{print $2}' | tail -1 || true
           }
-          size_latest=$(apex_size "https://download.oracle.com/otn_software/apex/apex-latest.zip" || true)
-          size_pinned=$(apex_size "${APEX_URL}" || true)
-          if [[ -z "${size_pinned}" ]]; then
+          fetch_headers() {
+            # `-f` NO evita que `-I` haya volcado ya las cabeceras del error, y
+            # la página de error de Akamai trae su propio ETag. Sin descartar la
+            # salida cuando curl falla, un 404 en la URL fijada se leía como
+            # "hay release nuevo" en vez de "el zip ya no está".
+            local out
+            out=$(curl -fsSLI --max-time 60 "$1") || return 1
+            printf '%s\n' "${out}"
+          }
+          h_latest=$(fetch_headers \
+            "https://download.oracle.com/otn_software/apex/apex-latest.zip" || true)
+          h_pinned=$(fetch_headers "${APEX_URL}" || true)
+
+          etag_latest=$(hdr_last "${h_latest}" etag); etag_latest="${etag_latest%%:*}"
+          etag_pinned=$(hdr_last "${h_pinned}" etag); etag_pinned="${etag_pinned%%:*}"
+          size_latest=$(hdr_last "${h_latest}" content-length)
+          size_pinned=$(hdr_last "${h_pinned}" content-length)
+
+          if [[ -z "${h_pinned}" ]]; then
             findings+="- APEX: no se pudo leer \`${APEX_URL}\`. Puede que Oracle haya retirado el zip de ${APEX_VERSION}."$'\n'
-          elif [[ -n "${size_latest}" && "${size_latest}" != "${size_pinned}" ]]; then
-            findings+="- APEX: \`apex-latest.zip\` pesa ${size_latest} bytes y el zip fijado de ${APEX_VERSION} pesa ${size_pinned}. Hay release nuevo o re-release (ojo: el SHA256 cambia)."$'\n'
+          elif [[ -z "${h_latest}" ]]; then
+            # Sin este aviso el check quedaría ciego en silencio, que es peor
+            # que no tenerlo: nadie se enteraría de que dejó de vigilar.
+            findings+="- APEX: no se pudo leer \`apex-latest.zip\`. El check quedo sin referencia; si Oracle movio esa URL, hay que corregirla en este workflow."$'\n'
+          elif [[ -n "${etag_latest}" && -n "${etag_pinned}" ]]; then
+            if [[ "${etag_latest}" != "${etag_pinned}" ]]; then
+              findings+="- APEX: el contenido de \`apex-latest.zip\` (ETag \`${etag_latest}\`) no coincide con el zip fijado de ${APEX_VERSION} (ETag \`${etag_pinned}\`). Hay release nuevo o re-release (ojo: el SHA256 cambia)."$'\n'
+            fi
+          elif [[ -n "${size_latest}" && -n "${size_pinned}" && "${size_latest}" != "${size_pinned}" ]]; then
+            findings+="- APEX: sin ETag en la respuesta; \`apex-latest.zip\` pesa ${size_latest} bytes y el zip fijado de ${APEX_VERSION} pesa ${size_pinned}. Hay release nuevo o re-release (ojo: el SHA256 cambia)."$'\n'
           fi
 
           if [[ -z "${findings}" ]]; then
