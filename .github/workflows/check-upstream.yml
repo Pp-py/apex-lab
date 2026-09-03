@@ -22,9 +22,10 @@ on:
     paths:
       - "**.sh"
 
+# Los permisos van por job, no acá: el lint solo lee el repo y no tiene por qué
+# heredar el `issues: write` que necesita el otro job.
 permissions:
   contents: read
-  issues: write
 
 jobs:
   # El build no corre en CI (~20 GB, los runners tienen ~14), pero el lint de
@@ -32,6 +33,8 @@ jobs:
   # del código ya asumían un lint que nunca se configuró.
   lint:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v5
 
@@ -48,6 +51,9 @@ jobs:
   check:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write     # abre o comenta el issue de actualizaciones
     steps:
       - uses: actions/checkout@v5
 
