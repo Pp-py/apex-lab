@@ -146,8 +146,27 @@ adentro.
 - **Las ACLs del build no cubren el esquema de la aplicación.** Un
   `APEX_WEB_SERVICE` desde código propio da `ORA-24247` hasta otorgarla; la
   receta está en `init.example/README.md`.
-- **Los scripts de `init/` corren una sola vez, como SYS y contra la CDB.**
-  Necesitan `ALTER SESSION SET CONTAINER=FREEPDB1`.
+- **Los scripts de `init/` corren en CADA arranque, como SYS y contra la CDB.**
+  Necesitan `ALTER SESSION SET CONTAINER=FREEPDB1` y **tienen que ser
+  idempotentes** (consultar el estado antes de actuar, patrón de
+  `init.example/01_workspace.sh.example`).
+
+  Van montados en `startdb.d`, no en `initdb.d`, y eso **no** es
+  intercambiable: el entrypoint corre `initdb.d` solo cuando la base no existe,
+  y lo decide con `[ -d oradata/dbconfig/$ORACLE_SID ]`. Como la imagen sale de
+  un `-faststart` + `docker commit`, ese directorio viaja dentro de la imagen y
+  se copia al volumen en el primer `up`: el entrypoint loguea `database already
+  initialized` y saltea `initdb.d` **siempre**, incluso con el volumen recién
+  creado. El repo documentó lo contrario hasta el 03/09/2026, cuando se verificó
+  que los scripts nunca se habían ejecutado.
+- **Las semillas de `init/` se parametrizan por `.env`, no por literales en el
+  SQL.** Los nombres y las contraseñas salen del bloque `Semillas de ./init`;
+  compose los pasa al contenedor y los `.sh` los leen del entorno. Por eso son
+  `.sh` y no `.sql`: SQL*Plus no lee variables de entorno.
+- **Un `.sh` en `init/` sin bit de ejecución se rompe raro.** El entrypoint
+  ejecuta los que tienen `+x` y *sourcea* los que no, y su rama de sourcing
+  tiene un bug de upstream (le falta un `;`, así que le pasa el `echo` siguiente
+  como argumento al script).
 - **`init/` está en `.gitignore` a propósito**: ahí va el DDL y los datos de cada
   proyecto, que no deben subir a este repo. Lo versionado es `init.example/`, y
   `build.sh` siembra `init/` desde ahí si falta. No agregues `init/` al índice

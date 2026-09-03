@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# ---------------------------------------------------------------------------
+# PLANTILLA INERTE (.example)
+#
+# El entrypoint de la imagen solo ejecuta *.sh, *.sql, *.sql.zip y *.sql.gz, asi
+# que con el sufijo .example este archivo se ignora. Para activarlo:
+#
+#     cp init.example/02_acl_app.sh.example init/02_acl_app.sh
+#     chmod +x init/02_acl_app.sh
+#
+# El chmod importa: sin el bit de ejecucion el entrypoint lo SOURCEA en vez de
+# ejecutarlo, y su rama de sourcing tiene un bug (le falta un ';', asi que le
+# pasa el echo siguiente como argumento). `cp` preserva el modo, asi que
+# copiando desde aca ya viene con el bit puesto.
+#
+# NO hay nada que editar adentro: los nombres y las claves salen de .env, que es
+# el unico punto de seteo. Ver el bloque "Semillas de ./init" en .env.example.
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 02_acl_app.sh - ACL de red para el esquema de la aplicación.
+#
+# POR QUÉ EXISTE: sql/20_network_acl.sql, que corre durante el build, cubre el
+# engine de APEX y APEX_REST_PUBLIC_USER. No puede cubrir el esquema de la
+# aplicación porque en ese momento todavía no existe. Sin esta ACL, cualquier
+# llamada saliente desde código propio —APEX_WEB_SERVICE, UTL_HTTP, UTL_SMTP—
+# falla.
+#
+# EL ERROR QUE VAS A VER ES `ORA-29273: HTTP request failed`, no un ORA-24247 a
+# secas: el 24247 viene anidado adentro y SQLERRM a veces muestra solo el
+# primero. Si ves un 29273 contra un host que sabés que responde, la ACL es la
+# primera sospechosa.
+#
+# ATENCIÓN: usa host => '*', igual que el script del build. Aceptable SOLO en un
+# entorno local desechable. En un servidor compartido las ACLs se otorgan por
+# host concreto: cambiar ACL_HOST abajo por el host que realmente vas a llamar.
+#
+# EL BIT +x ES OBLIGATORIO: ver la nota en 00_pdbadmin.sh.
+#
+# Contrato de init/: corre UNA SOLA VEZ, como el usuario `oracle`, en el primer
+# arranque del volumen. Conecta `/ as sysdba`, que entra a la CDB: de ahí el
+# ALTER SESSION SET CONTAINER.
+# ---------------------------------------------------------------------------
+set -Eeuo pipefail
+
+readonly SCRIPT_NAME="02_acl_app.sh"
+
+# Entorno local aislado. En cualquier otro lado, poner acá el host concreto.
+readonly ACL_HOST="*"
+
+log() { printf '[%s] %s\n' "${SCRIPT_NAME}" "$*"; }
+die() { printf '[%s] ERROR: %s\n' "${SCRIPT_NAME}" "$*" >&2; exit 1; }
+
+[[ -n "${APP_SCHEMA:-}" ]] || die \
+  "Falta APP_SCHEMA. Agregalo a tu .env (está en .env.example)."
+
+[[ "${APP_SCHEMA}" =~ ^[A-Za-z][A-Za-z0-9_]{0,29}$ ]] || die \
+  "APP_SCHEMA='${APP_SCHEMA}' no es un identificador válido de Oracle."
+
+log "Otorgando ACL de red a ${APP_SCHEMA} (host => ${ACL_HOST})..."
+
+sqlplus -s / as sysdba <<SQL
+WHENEVER SQLERROR EXIT FAILURE
+SET DEFINE OFF
+
+ALTER SESSION SET CONTAINER = FREEPDB1;
+
+-- El SERVEROUTPUT va DESPUES del ALTER SESSION (ver 00_pdbadmin.sh).
+SET SERVEROUTPUT ON SIZE UNLIMITED
+
+DECLARE
+  c_schema CONSTANT VARCHAR2(30) := '${APP_SCHEMA}';
+  l_count  PLS_INTEGER;
+BEGIN
+  -- Otorgar una ACL a un usuario que no existe crea un ACE colgado que despues
+  -- nadie entiende, asi que se verifica primero.
+  SELECT COUNT(*) INTO l_count FROM dba_users WHERE username = c_schema;
+
+  IF l_count = 0 THEN
+    raise_application_error(-20011,
+      'El esquema ' || c_schema || ' no existe: 01_workspace.sh no corrio.');
+  END IF;
+
+  -- append_host_ace es acumulativo: re-ejecutarlo fusiona privilegios sobre el
+  -- ACE existente en vez de duplicarlo, asi que el script es idempotente.
+  DBMS_NETWORK_ACL_ADMIN.append_host_ace(
+    host => '${ACL_HOST}',
+    ace  => xs\$ace_type(
+              privilege_list => xs\$name_list('connect', 'resolve'),
+              principal_name => c_schema,
+              principal_type => xs_acl.ptype_db ) );
+
+  COMMIT;
+  DBMS_OUTPUT.PUT_LINE('ACL de red otorgada a ' || c_schema
+    || ' (connect + resolve, host => ${ACL_HOST}).');
+END;
+/
+
+-- Verificacion: si el ACE no quedo, esto sale vacio.
+SET LINESIZE 130
+COLUMN host      FORMAT A12
+COLUMN principal FORMAT A18
+COLUMN privilege FORMAT A10
+SELECT host, principal, privilege, grant_type
+  FROM dba_host_aces
+ WHERE principal = '${APP_SCHEMA}'
+ ORDER BY privilege;
+EXIT
+SQL
+
+log "Listo."

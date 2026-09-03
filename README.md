@@ -75,7 +75,16 @@ Para destruir el entorno completo: `docker compose down -v`.
 ### Semillas del proyecto
 
 Los `.sql` y `.sh` que dejes en `./init/` se ejecutan **como SYS, contra la CDB
-y una sola vez**, en el primer arranque del volumen.
+y en CADA arranque del contenedor**, así que tienen que ser idempotentes.
+
+No es un descuido: el entrypoint corre `initdb.d` solo cuando la base no existe,
+y esta imagen ya la trae creada (`-faststart` + `docker commit`), así que ese
+directorio se saltea siempre —incluso con un volumen recién creado—. Por eso las
+semillas van a `startdb.d`. A cambio, cambiar el `.env` y reiniciar alcanza para
+que tomen efecto: no hace falta destruir el volumen.
+
+El workspace, el esquema y sus contraseñas salen del bloque `Semillas de ./init`
+de tu `.env`, que es el único punto de seteo.
 
 **`init/` no se versiona en este repo** (está en `.gitignore`): ahí viven el DDL,
 los datos de prueba y las credenciales de cada proyecto, y no tienen por qué

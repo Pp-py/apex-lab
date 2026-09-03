@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# ---------------------------------------------------------------------------
+# PLANTILLA INERTE (.example)
+#
+# El entrypoint de la imagen solo ejecuta *.sh, *.sql, *.sql.zip y *.sql.gz, asi
+# que con el sufijo .example este archivo se ignora. Para activarlo:
+#
+#     cp init.example/00_pdbadmin.sh.example init/00_pdbadmin.sh
+#     chmod +x init/00_pdbadmin.sh
+#
+# El chmod importa: sin el bit de ejecucion el entrypoint lo SOURCEA en vez de
+# ejecutarlo, y su rama de sourcing tiene un bug (le falta un ';', asi que le
+# pasa el echo siguiente como argumento). `cp` preserva el modo, asi que
+# copiando desde aca ya viene con el bit puesto.
+#
+# NO hay nada que editar adentro: los nombres y las claves salen de .env, que es
+# el unico punto de seteo. Ver el bloque "Semillas de ./init" en .env.example.
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 00_pdbadmin.sh - Fija la clave de PDBADMIN leyéndola del entorno.
+#
+# POR QUÉ EXISTE: la cuenta PDBADMIN viene creada dentro de la imagen base de
+# gvenzl con una clave que esa imagen nunca documenta, y el build de apex-lab no
+# la toca (solo fija APEX_PUBLIC_USER). Resultado: figura OPEN en dba_users pero
+# ningún login funciona, ni con ORACLE_PASSWORD. Verificado en este entorno:
+# system/oracle entra y pdbadmin/oracle da ORA-01017.
+#
+# Para prototipar NO hace falta: SYSTEM ya tiene todo. Está para cuando quieras
+# una cuenta administrativa de la PDB separada de SYS/SYSTEM.
+#
+# POR QUÉ ES .sh Y NO .sql: SQL*Plus no lee variables de entorno. El único punto
+# de seteo es .env (compose se lo pasa al contenedor), así que la clave tiene que
+# entrar por acá. Un .sql tendría que llevarla escrita adentro, duplicando un
+# valor que ya vive en .env.
+#
+# EL BIT +x ES OBLIGATORIO. El entrypoint de la imagen ejecuta los .sh que son
+# ejecutables y **sourcea** los que no; su rama de sourcing tiene un bug (le
+# falta un `;`, así que le pasa el `echo` siguiente como argumento al script).
+# Si perdés el bit de ejecución esto se rompe de una forma difícil de leer.
+#
+# Contrato de init/: corre UNA SOLA VEZ, como el usuario `oracle`, en el primer
+# arranque del volumen. Conecta `/ as sysdba`, que entra a la CDB: de ahí el
+# ALTER SESSION SET CONTAINER.
+# ---------------------------------------------------------------------------
+set -Eeuo pipefail
+
+readonly SCRIPT_NAME="00_pdbadmin.sh"
+
+log() { printf '[%s] %s\n' "${SCRIPT_NAME}" "$*"; }
+die() { printf '[%s] ERROR: %s\n' "${SCRIPT_NAME}" "$*" >&2; exit 1; }
+
+# Sin default a propósito: el default vive en .env.example y solo ahí. Si falta,
+# preferimos fallar acá antes que fijar una clave que nadie eligió.
+[[ -n "${PDBADMIN_PASSWORD:-}" ]] || die \
+  "Falta PDBADMIN_PASSWORD. Agregala a tu .env (está en .env.example) y volvé a
+       correr con el volumen recién creado: docker compose down -v && up -d"
+
+# La clave va dentro de un identificador entrecomillado del ALTER USER, así que
+# una comilla doble lo partiría en dos. Se rechaza el mismo conjunto que
+# build.sh, por el mismo motivo.
+if [[ "${PDBADMIN_PASSWORD}" =~ [\"\'\\[:space:]] ]]; then
+  die "PDBADMIN_PASSWORD no puede contener comillas, backslash ni espacios."
+fi
+
+log "Fijando la clave de PDBADMIN..."
+
+# SET DEFINE OFF: sin eso, un '&' en la clave se interpretaría como variable de
+# sustitución y la cuenta quedaría con una clave distinta de la del .env.
+sqlplus -s / as sysdba <<SQL
+WHENEVER SQLERROR EXIT FAILURE
+SET DEFINE OFF
+
+ALTER SESSION SET CONTAINER = FREEPDB1;
+
+-- El SERVEROUTPUT va DESPUES del ALTER SESSION: cambiar de contenedor descarta
+-- el buffer del lado del servidor y las lineas se pierden en silencio. Lo
+-- traicionero es que SHOW SERVEROUTPUT sigue diciendo ON.
+SET SERVEROUTPUT ON
+
+DECLARE
+  l_count PLS_INTEGER;
+BEGIN
+  -- Se consulta el estado antes de actuar, en vez de atrapar el error: un
+  -- WHEN OTHERS comparando SQLERRM contra literales en ingles se rompe con
+  -- NLS_LANGUAGE distinto de AMERICAN.
+  SELECT COUNT(*) INTO l_count FROM dba_users WHERE username = 'PDBADMIN';
+
+  IF l_count = 0 THEN
+    -- El perfil 'oracle' de base-profile.sh usa la imagen oficial, que puede
+    -- no traer esta cuenta. No es un error: no hay nada que fijar.
+    DBMS_OUTPUT.PUT_LINE('PDBADMIN no existe en esta imagen; nada que hacer.');
+  ELSE
+    EXECUTE IMMEDIATE 'ALTER USER PDBADMIN IDENTIFIED BY "${PDBADMIN_PASSWORD}"'
+      || ' ACCOUNT UNLOCK';
+    DBMS_OUTPUT.PUT_LINE('Clave de PDBADMIN fijada y cuenta desbloqueada.');
+  END IF;
+END;
+/
+EXIT
+SQL
+
+log "Listo."

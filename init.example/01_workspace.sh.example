@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+# ---------------------------------------------------------------------------
+# PLANTILLA INERTE (.example)
+#
+# El entrypoint de la imagen solo ejecuta *.sh, *.sql, *.sql.zip y *.sql.gz, asi
+# que con el sufijo .example este archivo se ignora. Para activarlo:
+#
+#     cp init.example/01_workspace.sh.example init/01_workspace.sh
+#     chmod +x init/01_workspace.sh
+#
+# El chmod importa: sin el bit de ejecucion el entrypoint lo SOURCEA en vez de
+# ejecutarlo, y su rama de sourcing tiene un bug (le falta un ';', asi que le
+# pasa el echo siguiente como argumento). `cp` preserva el modo, asi que
+# copiando desde aca ya viene con el bit puesto.
+#
+# NO hay nada que editar adentro: los nombres y las claves salen de .env, que es
+# el unico punto de seteo. Ver el bloque "Semillas de ./init" en .env.example.
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 01_workspace.sh - Crea el esquema de la aplicación, su workspace de APEX y el
+# usuario administrador de ese workspace, todo leído del entorno.
+#
+# POR QUÉ ES .sh Y NO .sql: SQL*Plus no lee variables de entorno. El único punto
+# de seteo es .env (compose se lo pasa al contenedor), así que los nombres y la
+# contraseña entran por acá. Un .sql los tendría que llevar escritos adentro,
+# duplicando valores que ya viven en .env.
+#
+# EL BIT +x ES OBLIGATORIO: ver la nota en 00_pdbadmin.sh.
+#
+# Contrato de init/: corre UNA SOLA VEZ, como el usuario `oracle`, en el primer
+# arranque del volumen. Conecta `/ as sysdba`, que entra a la CDB: de ahí el
+# ALTER SESSION SET CONTAINER.
+#
+# Idempotente igual: consulta el estado antes de actuar, así que se puede volver
+# a correr a mano sin romper nada.
+# ---------------------------------------------------------------------------
+set -Eeuo pipefail
+
+readonly SCRIPT_NAME="01_workspace.sh"
+
+log() { printf '[%s] %s\n' "${SCRIPT_NAME}" "$*"; }
+die() { printf '[%s] ERROR: %s\n' "${SCRIPT_NAME}" "$*" >&2; exit 1; }
+
+# Sin defaults a propósito: viven en .env.example y solo ahí. Si falta alguno,
+# preferimos fallar antes que crear un esquema con un nombre que nadie eligió.
+for var in APP_WORKSPACE APP_SCHEMA APP_WS_USER APP_EMAIL APP_PASSWORD; do
+  [[ -n "${!var:-}" ]] || die \
+    "Falta ${var}. Agregalo a tu .env (está en .env.example) y volvé a correr
+       con el volumen recién creado: docker compose down -v && up -d"
+done
+
+# Los nombres van sin entrecomillar en el DDL, así que se limitan a lo que
+# Oracle acepta como identificador simple. Se validan acá y no en PL/SQL para
+# que el mensaje diga cuál variable del .env está mal.
+for var in APP_WORKSPACE APP_SCHEMA APP_WS_USER; do
+  [[ "${!var}" =~ ^[A-Za-z][A-Za-z0-9_]{0,29}$ ]] || die \
+    "${var}='${!var}' no es un identificador válido de Oracle
+       (letra inicial, después letras/dígitos/'_', hasta 30 caracteres)."
+done
+
+# La contraseña va dentro de un identificador entrecomillado del CREATE USER:
+# una comilla doble lo partiría en dos. Mismo conjunto que rechaza build.sh.
+if [[ "${APP_PASSWORD}" =~ [\"\'\\[:space:]] ]]; then
+  die "APP_PASSWORD no puede contener comillas, backslash ni espacios."
+fi
+
+log "Creando esquema ${APP_SCHEMA}, workspace ${APP_WORKSPACE} y usuario ${APP_WS_USER}..."
+
+# SET DEFINE OFF: sin eso, un '&' en la contraseña se interpretaría como
+# variable de sustitución y la cuenta quedaría con otra clave.
+sqlplus -s / as sysdba <<SQL
+WHENEVER SQLERROR EXIT FAILURE
+SET DEFINE OFF
+
+ALTER SESSION SET CONTAINER = FREEPDB1;
+
+-- El SERVEROUTPUT va DESPUES del ALTER SESSION (ver 00_pdbadmin.sh).
+SET SERVEROUTPUT ON
+
+DECLARE
+  c_schema    CONSTANT VARCHAR2(30) := '${APP_SCHEMA}';
+  c_workspace CONSTANT VARCHAR2(30) := '${APP_WORKSPACE}';
+  c_ws_user   CONSTANT VARCHAR2(30) := '${APP_WS_USER}';
+  c_email     CONSTANT VARCHAR2(240):= '${APP_EMAIL}';
+  l_count     PLS_INTEGER;
+BEGIN
+  ------------------------------------------------------------------------
+  -- 1. Esquema de la aplicacion
+  ------------------------------------------------------------------------
+  SELECT COUNT(*) INTO l_count FROM dba_users WHERE username = c_schema;
+
+  IF l_count = 0 THEN
+    EXECUTE IMMEDIATE 'CREATE USER ' || c_schema
+      || ' IDENTIFIED BY "${APP_PASSWORD}"'
+      || ' DEFAULT TABLESPACE USERS QUOTA UNLIMITED ON USERS';
+    DBMS_OUTPUT.PUT_LINE('Esquema ' || c_schema || ' creado.');
+  ELSE
+    -- Se resincroniza la clave en cada arranque, igual que 00_pdbadmin.sh: si
+    -- no, cambiar APP_PASSWORD en el .env no tendria efecto y el "punto de
+    -- seteo unico" seria mentira. Es un ALTER idempotente: si la clave ya es
+    -- esa, no cambia nada.
+    EXECUTE IMMEDIATE 'ALTER USER ' || c_schema
+      || ' IDENTIFIED BY "${APP_PASSWORD}"';
+    DBMS_OUTPUT.PUT_LINE('Esquema ' || c_schema
+      || ' ya existia; clave resincronizada desde APP_PASSWORD.');
+  END IF;
+
+  -- Los GRANT son idempotentes por si mismos: repetirlos no falla.
+  EXECUTE IMMEDIATE 'GRANT CREATE SESSION, CREATE TABLE, CREATE VIEW,'
+    || ' CREATE SEQUENCE, CREATE PROCEDURE, CREATE TRIGGER, CREATE TYPE,'
+    || ' CREATE SYNONYM, CREATE MATERIALIZED VIEW, CREATE JOB TO ' || c_schema;
+  DBMS_OUTPUT.PUT_LINE('Privilegios de desarrollo otorgados a ' || c_schema || '.');
+
+  ------------------------------------------------------------------------
+  -- 2. Workspace de APEX, asociado a ese esquema
+  ------------------------------------------------------------------------
+  SELECT COUNT(*) INTO l_count
+    FROM apex_workspaces WHERE workspace = c_workspace;
+
+  IF l_count = 0 THEN
+    apex_instance_admin.add_workspace(
+      p_workspace      => c_workspace,
+      p_primary_schema => c_schema);
+    DBMS_OUTPUT.PUT_LINE('Workspace ' || c_workspace
+      || ' creado sobre el esquema ' || c_schema || '.');
+  ELSE
+    DBMS_OUTPUT.PUT_LINE('Workspace ' || c_workspace || ' ya existia; no se toca.');
+  END IF;
+
+  ------------------------------------------------------------------------
+  -- 3. Usuario administrador del workspace
+  --
+  -- create_user necesita el contexto del workspace: sin el security group id
+  -- la cuenta se crearia colgada del workspace equivocado.
+  ------------------------------------------------------------------------
+  apex_util.set_security_group_id(
+    apex_util.find_security_group_id(c_workspace));
+
+  SELECT COUNT(*) INTO l_count
+    FROM apex_workspace_apex_users
+   WHERE workspace_name = c_workspace
+     AND user_name      = c_ws_user;
+
+  IF l_count = 0 THEN
+    -- OJO: create_user recibe P_DEVELOPER_PRIVS; es edit_user el que recibe
+    -- P_DEVELOPER_ROLES. La asimetria es de la API de Oracle, no un typo.
+    apex_util.create_user(
+      p_user_name                    => c_ws_user,
+      p_web_password                 => '${APP_PASSWORD}',
+      p_email_address                => c_email,
+      p_default_schema               => c_schema,
+      p_developer_privs              => 'ADMIN:CREATE:DATA_LOADER:EDIT:HELP:MONITOR:SQL',
+      p_change_password_on_first_use => 'N');
+    DBMS_OUTPUT.PUT_LINE('Usuario ' || c_ws_user || ' creado en ' || c_workspace || '.');
+  ELSE
+    -- A diferencia del esquema, la clave del usuario de APEX NO se
+    -- resincroniza: apex_util.edit_user pide el juego completo de parametros y
+    -- pasar NULLs borra campos del usuario, asi que el riesgo de pisar algo
+    -- editado desde el Builder es mayor que la comodidad. Para cambiarla:
+    -- desde el Builder, o apex_util.reset_pw con el workspace en contexto.
+    DBMS_OUTPUT.PUT_LINE('Usuario ' || c_ws_user
+      || ' ya existia; no se toca (su clave no se resincroniza).');
+  END IF;
+
+  COMMIT;
+END;
+/
+
+-- Verificacion: si algo quedo a medias, esto lo muestra.
+SET LINESIZE 130
+COLUMN workspace FORMAT A16
+COLUMN schema    FORMAT A16
+COLUMN usuario   FORMAT A16
+SELECT w.workspace, s.schema, u.user_name AS usuario
+  FROM apex_workspaces w
+       LEFT JOIN apex_workspace_schemas s
+              ON s.workspace_name = w.workspace
+       LEFT JOIN apex_workspace_apex_users u
+              ON u.workspace_name = w.workspace
+ WHERE w.workspace = '${APP_WORKSPACE}';
+EXIT
+SQL
+
+log "Listo."

@@ -11,29 +11,78 @@ de `apex-lab`.
 cp -r init.example init
 ```
 
-Todo `.sql` y `.sh` que dejes en `init/` se ejecuta cuando arranca la base. Sirve
-para crear el esquema de la aplicación, cargar datos de prueba o instalar
-utilidades.
+El entrypoint de la imagen ejecuta lo que dejes en `init/` que termine en `.sh`,
+`.sql`, `.sql.zip` o `.sql.gz`, en orden alfabético — de ahí el prefijo numérico.
+Cualquier otro nombre se ignora, y eso es lo que hace **inertes** a las
+plantillas de acá: terminan en `.example`.
 
 ```
-init/
-├── 01_crear_esquema.sql
-├── 02_acl_esquema_app.sql
-└── 03_datos_demo.sql
+init.example/                        init/  (lo que corre)
+├── 00_pdbadmin.sh.example    ──cp──▶ 00_pdbadmin.sh
+├── 01_workspace.sh.example   ──cp──▶ 01_workspace.sh
+└── 02_acl_app.sh.example     ──cp──▶ 02_acl_app.sh
 ```
 
-Se ejecutan en orden alfabético, de ahí el prefijo numérico.
+Para activar una:
+
+```bash
+cp init.example/01_workspace.sh.example init/01_workspace.sh
+```
+
+Y nada más: **no hay nada que editar adentro.** Los nombres del workspace y del
+esquema, y las contraseñas, salen del bloque `Semillas de ./init` de tu `.env`,
+que es el único punto de seteo. Los scripts los leen del entorno del contenedor,
+que compose llena desde ese `.env`.
+
+Qué hace cada una:
+
+| Plantilla | Qué crea |
+|---|---|
+| `00_pdbadmin.sh` | Fija la clave de `PDBADMIN`, que la imagen base deja con una que nunca documenta. **Opcional**: `SYSTEM` ya alcanza para prototipar. |
+| `01_workspace.sh` | El esquema de la aplicación, su workspace de APEX y el usuario administrador de ese workspace. |
+| `02_acl_app.sh` | La ACL de red del esquema, para que su PL/SQL pueda hacer llamadas salientes. |
+
+### El bit de ejecución no es opcional
+
+El entrypoint **ejecuta** los `.sh` que tienen `+x` y **sourcea** los que no, y
+su rama de sourcing tiene un bug: le falta un `;`, así que le pasa el `echo`
+siguiente como argumento al script. Un `.sh` sin `+x` se rompe de una forma
+bastante difícil de leer.
+
+Las plantillas ya vienen con el bit puesto y `cp` preserva el modo, así que
+copiando desde acá no hay nada que hacer. Si lo perdés:
+
+```bash
+chmod +x init/*.sh
+```
 
 ## Tres cosas que se olvidan siempre
 
-1. **Corren UNA SOLA VEZ**, en el primer arranque del volumen `oradata`. Editar
-   un script después no hace nada. Para volver a ejecutarlos:
-   `docker compose down -v` (destruye la base) y `up` de nuevo.
-2. **Corren como SYS y contra la CDB**, no contra la PDB. Si tu script trabaja
-   sobre la aplicación —que es lo normal— tiene que abrir el contenedor:
+1. **Corren en CADA arranque del contenedor**, así que **tienen que ser
+   idempotentes**: consultá el estado antes de actuar, como hacen las
+   plantillas. Un `CREATE USER` a secas falla en el segundo `up`.
+
+   Suena raro para algo llamado "init", y tiene una razón. El entrypoint corre
+   `initdb.d` solo cuando la base **no** existe, y lo decide con
+   `[ -d oradata/dbconfig/$ORACLE_SID ]`. Esta imagen sale de un `-faststart` +
+   `docker commit`, así que ese directorio viaja dentro de la imagen y se copia
+   al volumen en el primer `up`: el entrypoint loguea `database already
+   initialized` y saltea `initdb.d` **siempre**, incluso con un volumen recién
+   creado. Por eso `compose.yml` monta `./init` en `startdb.d`, que corre fuera
+   de ese condicional.
+
+   Lo bueno del cambio: **editar el `.env` y reiniciar alcanza**. No hace falta
+   `down -v` para que una semilla nueva tome efecto —solo para volver a una base
+   limpia—.
+2. **Corren como SYS y contra la CDB**, no contra la PDB — los `.sql` por
+   `sqlplus / as sysdba`, y los `.sh` porque conectan igual. Si tu script
+   trabaja sobre la aplicación —que es lo normal— tiene que abrir el contenedor:
    ```sql
    ALTER SESSION SET CONTAINER = FREEPDB1;
    ```
+   Y si vas a usar `DBMS_OUTPUT`, el `SET SERVEROUTPUT ON` va **después** de ese
+   `ALTER SESSION`: cambiar de contenedor descarta el buffer del lado del
+   servidor y las líneas se pierden sin aviso.
 3. **Un error acá no siempre aborta el arranque.** Revisá `docker compose logs db`
    después del primer `up` en vez de asumir que salió bien.
 
@@ -59,30 +108,23 @@ a secas: el 24247 viene anidado adentro y `SQLERRM` a veces solo muestra el
 primero. Verificado en este entorno. Si ves un 29273 contra un host que sabés
 que responde, la ACL es la primera sospechosa.
 
-Copiá esto como `init/02_acl_esquema_app.sql` y cambiá el nombre del esquema:
+Esto ya está resuelto en `02_acl_app.sh.example`: toma el esquema de
+`APP_SCHEMA` y le otorga `connect` + `resolve`. Activalo con
 
-```sql
--- ---------------------------------------------------------------------------
--- ACL de red para el esquema de la aplicacion.
--- Entorno local desechable: host => '*'. En un servidor compartido esto se
--- otorga por host concreto (y por puerto), nunca con comodin.
--- ---------------------------------------------------------------------------
-ALTER SESSION SET CONTAINER = FREEPDB1;
-SET SERVEROUTPUT ON SIZE UNLIMITED
+```bash
+cp init.example/02_acl_app.sh.example init/02_acl_app.sh
+```
 
-DECLARE
-    c_schema CONSTANT VARCHAR2(128) := 'MI_APP';   -- <-- cambiar
-BEGIN
-    DBMS_NETWORK_ACL_ADMIN.append_host_ace(
-        host => '*',
-        ace  => xs$ace_type(
-                    privilege_list => xs$name_list('connect', 'resolve'),
-                    principal_name => c_schema,
-                    principal_type => xs_acl.ptype_db ) );
-    COMMIT;
-    DBMS_OUTPUT.put_line('ACL de red otorgada a ' || c_schema);
-END;
-/
+El script usa `host => '*'`, igual que el del build: **correcto en un entorno
+local aislado, incorrecto en cualquier otro lado.** Si lo llevás a un servidor
+compartido, cambiá `ACL_HOST` por el host concreto que vas a llamar.
+
+Como `append_host_ace` es acumulativo, re-ejecutarlo fusiona privilegios sobre
+el ACE existente en vez de duplicarlo: el script es idempotente y se puede
+correr a mano sin destruir el volumen.
+
+```bash
+docker exec <contenedor-db> /container-entrypoint-initdb.d/02_acl_app.sh
 ```
 
 ### Si el endpoint es HTTPS

@@ -21,8 +21,18 @@ services:
     image: ${APEX_DB_IMAGE:-apex-lab:latest}
     container_name: ${COMPOSE_PROJECT_NAME:-apexlab}-db
     restart: unless-stopped
-    # La SGA vive en /dev/shm. Con el default de 64 MB la instancia no arranca.
     shm_size: 2gb
+    environment:
+      # Semillas que leen los .sh de ./init. Se declaran SIN valor por defecto a
+      # propósito: el default vive en .env.example y solo ahí, así que si falta
+      # en tu .env el script de init falla con un mensaje claro en vez de crear
+      # el esquema con una contraseña que no es la que creías.
+      APP_WORKSPACE: ${APP_WORKSPACE}
+      APP_SCHEMA: ${APP_SCHEMA}
+      APP_WS_USER: ${APP_WS_USER}
+      APP_EMAIL: ${APP_EMAIL}
+      APP_PASSWORD: ${APP_PASSWORD}
+      PDBADMIN_PASSWORD: ${PDBADMIN_PASSWORD}
     ports:
       # BIND_ADDR es 127.0.0.1 por defecto a propósito: las credenciales de este
       # entorno son públicas (viven en versions.env) y APEX corre sin HTTPS.
