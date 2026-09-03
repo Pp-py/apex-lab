@@ -34,10 +34,13 @@ services:
       # volumen. Solo pasa una vez por proyecto. A cambio, los cambios de
       # esquema (y la instalación de ORDS) sobreviven a `down` sin `-v`.
       - oradata:/opt/oracle/oradata
-      # Semillas del proyecto: se ejecutan como SYS contra la CDB, UNA SOLA VEZ,
-      # en el primer arranque del volumen. Ver init.example/README.md.
-      # La ruta depende de la imagen base (ver DB_IMAGE_PROFILE en versions.env).
-      - ./init:${DB_INITDB_DIR:-/container-entrypoint-initdb.d}:ro
+      # Semillas del proyecto: se ejecutan como SYS contra la CDB en CADA
+      # arranque, así que tienen que ser idempotentes. Ver init.example/README.md.
+      #
+      # No es initdb.d: el entrypoint corre ese directorio solo cuando la base no
+      # existe, y nuestra imagen ya la trae creada (-faststart + commit), así que
+      # lo saltea siempre. La ruta depende de la imagen base (DB_IMAGE_PROFILE).
+      - ./init:${DB_SEED_DIR:-/container-entrypoint-startdb.d}:ro
     healthcheck:
       test: ["CMD", "${DB_HEALTHCHECK_CMD:-healthcheck.sh}"]
       interval: 10s

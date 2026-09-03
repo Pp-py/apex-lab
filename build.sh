@@ -27,7 +27,7 @@ readonly APEX_INSTALL_TIMEOUT=3600
 # Claves de .env que NO se editan a mano: se derivan de versions.env y del
 # perfil de imagen. Ver sync_env().
 readonly DERIVED_KEYS=(
-  APEX_DB_IMAGE ORDS_TAG ORACLE_PASSWORD DB_HEALTHCHECK_CMD DB_INITDB_DIR
+  APEX_DB_IMAGE ORDS_TAG ORACLE_PASSWORD DB_HEALTHCHECK_CMD DB_SEED_DIR
 )
 
 # Charset permitido en las contraseñas de build. Las contraseñas viajan a los
@@ -155,7 +155,7 @@ derived_value() {
     ORDS_TAG)           printf '%s' "${ORDS_TAG}" ;;
     ORACLE_PASSWORD)    printf '%s' "${BUILD_ORACLE_PASSWORD}" ;;
     DB_HEALTHCHECK_CMD) printf '%s' "${DB_HEALTHCHECK_CMD}" ;;
-    DB_INITDB_DIR)      printf '%s' "${DB_INITDB_DIR}" ;;
+    DB_SEED_DIR)        printf '%s' "${DB_SEED_DIR}" ;;
     *)                  die "derived_value: clave desconocida '$1'" ;;
   esac
 }

@@ -19,7 +19,15 @@ case "${DB_IMAGE_PROFILE:-gvenzl}" in
   gvenzl)
     DB_PASSWORD_ENV="ORACLE_PASSWORD"
     DB_HEALTHCHECK_CMD="healthcheck.sh"
-    DB_INITDB_DIR="/container-entrypoint-initdb.d"
+    # OJO: startdb.d, NO initdb.d. El entrypoint corre initdb.d solo cuando la
+    # base NO existe, y decide eso con [ -d oradata/dbconfig/$ORACLE_SID ]. Como
+    # nuestra imagen sale de un -faststart + docker commit, ese directorio viaja
+    # DENTRO de la imagen y se copia al volumen en el primer up: el entrypoint
+    # loguea "database already initialized" y saltea initdb.d SIEMPRE, incluso
+    # con un volumen recien creado. startdb.d corre en cada arranque, fuera de
+    # ese condicional, y por eso los scripts de init/ tienen que ser
+    # idempotentes. Verificado el 03/09/2026.
+    DB_SEED_DIR="/container-entrypoint-startdb.d"
     DB_PDB="FREEPDB1"
     # La base ya viene creada en las variantes -faststart.
     DB_READY_TIMEOUT=900
@@ -39,7 +47,9 @@ case "${DB_IMAGE_PROFILE:-gvenzl}" in
   oracle)
     DB_PASSWORD_ENV="ORACLE_PWD"
     DB_HEALTHCHECK_CMD="/opt/oracle/checkDBStatus.sh"
-    DB_INITDB_DIR="/opt/oracle/scripts/setup"
+    # Mismo criterio que en gvenzl: 'startup' corre en cada arranque y 'setup'
+    # solo cuando la imagen crea la base. Sin validar (este perfil es el plan B).
+    DB_SEED_DIR="/opt/oracle/scripts/startup"
     DB_PDB="FREEPDB1"
     DB_READY_TIMEOUT=1800
     ;;
@@ -51,4 +61,4 @@ case "${DB_IMAGE_PROFILE:-gvenzl}" in
     ;;
 esac
 
-export DB_PASSWORD_ENV DB_HEALTHCHECK_CMD DB_INITDB_DIR DB_PDB DB_READY_TIMEOUT
+export DB_PASSWORD_ENV DB_HEALTHCHECK_CMD DB_SEED_DIR DB_PDB DB_READY_TIMEOUT

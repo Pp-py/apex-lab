@@ -119,14 +119,14 @@ contraseña, healthcheck, directorio de scripts de init) están aisladas en
    oficial (tag `full`, nunca `lite`). `build.sh` valida que perfil e imagen sean
    de la misma familia y aborta si los cruzás.
 2. `./build.sh`. El `.env` viejo va a divergir: el build corta indicando las dos
-   líneas exactas a corregir (`DB_HEALTHCHECK_CMD`, `DB_INITDB_DIR`).
+   líneas exactas a corregir (`DB_HEALTHCHECK_CMD`, `DB_SEED_DIR`).
    Corregilas y volvé a correr.
 
 | | `gvenzl` | `oracle` |
 |---|---|---|
 | Contraseña | `ORACLE_PASSWORD` | `ORACLE_PWD` |
 | Healthcheck | `healthcheck.sh` | `/opt/oracle/checkDBStatus.sh` |
-| Scripts de init | `/container-entrypoint-initdb.d` | `/opt/oracle/scripts/setup` |
+| Semillas (`DB_SEED_DIR`) | `/container-entrypoint-startdb.d` | `/opt/oracle/scripts/startup` |
 | Cambiar contraseña | `resetPassword` | `setPassword.sh` |
 | Crear usuario de app | `createAppUser` | a mano (`CREATE USER ...`) |
 

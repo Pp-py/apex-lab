@@ -74,7 +74,7 @@ cambio silencioso.
 
 `build.sh` **propaga** los valores derivados al `.env` que consume compose
 (`APEX_DB_IMAGE`, `ORDS_TAG`, `ORACLE_PASSWORD`, `DB_HEALTHCHECK_CMD`,
-`DB_INITDB_DIR`) y **aborta** si un `.env` existente divergió, indicando la
+`DB_SEED_DIR`) y **aborta** si un `.env` existente divergió, indicando la
 línea exacta. El resto de `.env` —`COMPOSE_PROJECT_NAME` y los puertos— es
 legítimamente por-proyecto y `build.sh` no lo toca.
 
