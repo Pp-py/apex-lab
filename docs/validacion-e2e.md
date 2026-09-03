@@ -6,6 +6,9 @@ método, y los siete bugs que la corrida destapó.
 
 Entorno de la corrida: Docker 29.7.2 sobre WSL2 (Ubuntu 24.04), ext4.
 
+El **03/09/2026 se repitió sobre la base 23.26.3** y volvió a pasar completa;
+está registrado en [Revalidación sobre 23.26.3](#revalidación-sobre-23263).
+
 ## Resultado
 
 | Punto | Estado | Cómo se verificó |
@@ -30,6 +33,49 @@ Entorno de la corrida: Docker 29.7.2 sobre WSL2 (Ubuntu 24.04), ext4.
 | Build | ~30 min | **6 m 58 s** |
 | Imagen | ~7 GB | **16,3 GB** (base 11,6 + capa 4,7) |
 | Primer `up` | "tarda muchísimo" | **9 s**, volumen de 4,5 GB |
+
+## Revalidación sobre 23.26.3
+
+El 03/09/2026 se subió la base a `gvenzl/oracle-free:23.26.3-full-faststart` y se
+rehorneó. Mismo entorno (Docker 29.7.2 sobre WSL2, Ubuntu 24.04). **La corrida
+pasó completa y no destapó ningún bug nuevo**: ninguno de los siete de arriba
+volvió.
+
+| Punto | Estado |
+|---|---|
+| Build | ✅ `exit 0` en 14 m 52 s |
+| Imagen | ✅ `apex-lab:db23.26.3-apex26.1`, 16,3 GB |
+| BD | ✅ `23.26.3.0.0` (`v$version`) |
+| `dba_registry` | ✅ todo `VALID`; RAC en `OPTION OFF` |
+| Engine de APEX | ✅ `26.1.0 VALID`, 0 objetos inválidos |
+| Builder | ✅ HTTP 302 al sign-in |
+| Estáticos `/i/` | ✅ CSS `200 text/css` (667 KB), JS `200 text/javascript` |
+| ACLs del engine | ✅ `APEX_260100` y `APEX_REST_PUBLIC_USER`, CONNECT + RESOLVE |
+| SMTP → Mailpit | ✅ correo real capturado |
+| `up -d` con volumen nuevo | ✅ 13,6 s |
+
+Los **14 m 52 s no se comparan con los 6 m 58 s** de la primera corrida: acá
+entró el `docker pull` de una base nueva (2,6 GiB comprimidos, ~11,6 GB
+extraídos), que en la corrida original ya estaba local.
+
+Subir la base **obliga a `down -v`**. El volumen conserva los datafiles de la
+versión anterior, y como el faststart solo los copia cuando el volumen está
+vacío, un `down` común deja binarios nuevos sobre datafiles viejos: la base
+abre, pero sin el `datapatch` que le corresponde. En un entorno desechable la
+respuesta es destruir el volumen; si algún día no lo es, hay que sacar un dump
+antes.
+
+### Dos trampas al verificar, no del entorno
+
+- **`apex_mail_queue` filtra por workspace.** En una sesión sin
+  `apex_util.set_security_group_id(...)` devuelve 0 filas siempre, así que
+  "la cola está vacía" no prueba nada. Con el contexto puesto sí se ve, y ahí
+  `MAIL_SEND_ERROR` dice por qué no salió. Ojo también con el nombre de la
+  columna: es `MAIL_SUBJ`, no `MAIL_SUBJECT`.
+- **`push_queue` entrega recién al commit.** Consultar la API de Mailpit
+  inmediatamente después del bloque PL/SQL da `total: 0` aunque todo esté bien.
+  Es una carrera del test, no una falla del SMTP: hay que commitear (o cerrar la
+  sesión) y recién ahí mirar.
 
 ## Bugs que la corrida destapó
 

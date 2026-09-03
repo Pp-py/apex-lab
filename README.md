@@ -267,6 +267,13 @@ build limpio en 6 m 58 s, APEX 26.1 `VALID` con 0 objetos inválidos, el Builder
 sirviendo sus estáticos, correo cayendo en Mailpit y las ACLs de red
 funcionando desde un esquema de aplicación.
 
+**Revalidado el 03/09/2026** al subir la base a 23.26.3: la corrida pasó
+completa y sin bugs nuevos. Detalle en
+[`docs/validacion-e2e.md`](docs/validacion-e2e.md). Tené en cuenta que subir la
+versión de la base **obliga a `docker compose down -v`**: el volumen guarda los
+datafiles de la versión anterior y el faststart solo los copia cuando está
+vacío, así que conservarlo deja binarios nuevos sobre datafiles viejos.
+
 El plan B de la imagen oficial sigue **sin ejercitar** es el perfil `oracle` de
 `scripts/base-profile.sh`: es fallback, no el camino principal. Cuando lo
 necesites, esperá tener que ajustar algún detalle.

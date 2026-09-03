@@ -157,7 +157,13 @@ adentro.
 
 El entorno **está validado end-to-end** (26/08/2026, Docker 29.7.2 sobre WSL2):
 build en 6 m 58 s, APEX 26.1 VALID, ORDS sirviendo el Builder con estáticos,
-correo cayendo en Mailpit y ACLs funcionando.
+correo cayendo en Mailpit y ACLs funcionando. **Revalidado el 03/09/2026** sobre
+la base 23.26.3, sin bugs nuevos.
+
+**Subir la versión de la base obliga a `docker compose down -v`.** El volumen
+guarda los datafiles de la versión anterior y el faststart solo los copia cuando
+está vacío: conservarlo deja binarios nuevos sobre datafiles viejos, sin el
+`datapatch` que corresponde.
 
 [`docs/validacion-e2e.md`](docs/validacion-e2e.md) registra qué se verificó y
 cómo, más los siete bugs que la corrida destapó — ninguno era detectable sin
