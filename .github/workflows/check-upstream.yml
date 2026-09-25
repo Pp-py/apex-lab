@@ -78,6 +78,55 @@ jobs:
       - name: Chequeos estaticos sobre el checkout
         run: ./doctor.sh --static
 
+  # El round-trip completo necesita el stack levantado (base + ORDS + ~16 GB de
+  # imagen), asi que en CI corre lo que SI se puede: el self-test de los parsers
+  # y la etapa `validate` contra el SQLcl de verdad.
+  #
+  # Los dos pasos cubren cosas distintas y por eso estan los dos. El self-test
+  # prueba que los parsers detectan el fallo; `apex validate` real prueba que el
+  # formato de salida que esos parsers esperan sigue siendo el que SQLcl emite.
+  # Con solo el primero, una version nueva de SQLcl que cambie el texto romperia
+  # el script y CI seguiria en verde.
+  #
+  # `apex validate` y `apex generate` no necesitan base: verificado contra
+  # ords:26.1.2 con `sql /nolog`. La imagen se baja sin credenciales (~1,6 GB).
+  roundtrip:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Self-test de los parsers con salidas reales de SQLcl
+        run: ./scripts/test-roundtrip.sh
+
+      - name: apex validate real contra la app de referencia
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          source versions.env
+          IMG="container-registry.oracle.com/database/ords:${ORDS_TAG}"
+          docker pull -q "${IMG}"
+
+          # Se genera la app con el generador oficial de Oracle y se la valida,
+          # las dos cosas sin base (`sql /nolog`).
+          docker run --rm --entrypoint bash "${IMG}" -c '
+            printf "apex generate -dir /tmp/g -alias APEXLAB-ROUNDTRIP -id 9000 -name \"apex-lab roundtrip\"\nexit\n" \
+              | sql -s /nolog
+            printf "apex validate -input /tmp/g/apexlab-roundtrip\nexit\n" | sql -s /nolog' \
+            | tee validate.log
+
+          # El veredicto lo da el MISMO parser que usa el script, no un grep
+          # escrito aparte: si el formato de salida de SQLcl cambia, lo que
+          # tiene que fallar es el codigo que corre de verdad.
+          source scripts/lib/checks.sh
+          source scripts/lib/roundtrip.sh
+          grep -qF 'Files created at' validate.log \
+            || { echo "::error::apex generate no genero la app de referencia"; exit 1; }
+          rt_parse_validate validate.log \
+            || { echo "::error::${CHECK_DETAIL%%$'\n'*}"; exit 1; }
+          echo "OK: ${CHECK_DETAIL}"
+
   check:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
