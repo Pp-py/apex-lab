@@ -72,9 +72,10 @@ mkdir -p ~/proyectos/proyecto-x && cd ~/proyectos/proyecto-x
 
 # Se copia el .env ya generado, no el .example: trae los valores derivados
 # (imagen, ORDS_TAG, contraseña, perfil) resueltos por el build.
-# doctor.sh NO viaja solo: necesita su scripts/lib/.
+# Ni doctor.sh ni apex-roundtrip.sh viajan solos: necesitan su scripts/lib/.
 cp ~/apex-lab/compose.yml ~/apex-lab/.env ~/apex-lab/doctor.sh .
 mkdir -p scripts && cp -r ~/apex-lab/scripts/lib scripts/
+cp ~/apex-lab/scripts/apex-roundtrip.sh scripts/
 
 # Los estáticos de APEX. compose los monta desde ./cache/apex, ruta RELATIVA a
 # ESTE directorio: sin esto Docker crea el directorio vacío, lo monta igual y
@@ -239,6 +240,9 @@ errores conocidos.
 ### Prerequisitos
 
 El stack tiene que estar **levantado** (`db` y `ords`; Mailpit no hace falta).
+Corre igual en este repo y en un directorio de proyecto, siempre que hayas
+copiado `scripts/apex-roundtrip.sh` junto a `scripts/lib/` (está en la receta
+de [Un proyecto nuevo](#un-proyecto-nuevo)).
 El script no lo levanta ni lo baja, no borra apps y no toca el `.env`. Lo único
 que escribe es la app destino y su directorio de evidencia.
 
