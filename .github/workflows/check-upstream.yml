@@ -111,9 +111,9 @@ jobs:
           # Se genera la app con el generador oficial de Oracle y se la valida,
           # las dos cosas sin base (`sql /nolog`).
           docker run --rm --entrypoint bash "${IMG}" -c '
-            printf "apex generate -dir /tmp/g -alias APEXLAB-ROUNDTRIP -id 9000 -name \"apex-lab roundtrip\"\nexit\n" \
+            printf "apex generate -dir /tmp/g -alias APEXLAB-RT-9000 -id 9000 -name \"apex-lab roundtrip\"\nexit\n" \
               | sql -s /nolog
-            printf "apex validate -input /tmp/g/apexlab-roundtrip\nexit\n" | sql -s /nolog' \
+            printf "apex validate -input /tmp/g/apexlab-rt-9000\nexit\n" | sql -s /nolog' \
             | tee validate.log
 
           # El veredicto lo da el MISMO parser que usa el script, no un grep

@@ -255,7 +255,9 @@ main() {
       _emit 1 origen
       morir 70 "no se pudo generar la app de referencia"
     fi
-    src_remote="${run_dir}/${RT_ALIAS,,}"
+    # apex generate nombra la carpeta con el alias en minuscula.
+    local alias_gen; alias_gen="$(rt_alias_for "${APP_ID}")"
+    src_remote="${run_dir}/${alias_gen,,}"
     docker cp "${RT_ORDS}:${src_remote}" "${src_host}" >/dev/null
     _ok "app de referencia generada por SQLcl ($(rt_source_pages "${src_host}") paginas)"
     _emit 0 origen
@@ -294,7 +296,7 @@ main() {
     _emit 1 guarda-de-id
     morir 75 "no se pudo verificar el ID destino"
   fi
-  if [[ "${alias_actual}" != "LIBRE" && "${alias_actual}" != "${RT_ALIAS}" ]]; then
+  if [[ "${alias_actual}" != "LIBRE" ]] && ! rt_alias_is_ours "${alias_actual}"; then
     if [[ ${FORCE} -eq 0 ]]; then
       CHECK_DETAIL="El ID ${APP_ID} ya lo ocupa la app '${alias_actual}', que NO es la de
    este test. Importar la sobrescribiria entera y sin deshacer."
@@ -309,7 +311,7 @@ main() {
     _emit 2 guarda-de-id
   else
     local estado="libre"
-    [[ "${alias_actual}" == "LIBRE" ]] || estado="ocupado por ${RT_ALIAS}, que es la app de este test"
+    [[ "${alias_actual}" == "LIBRE" ]] || estado="ocupado por ${alias_actual}, que es una app de este test"
     _ok "ID ${APP_ID} ${estado}"
     _emit 0 guarda-de-id
   fi

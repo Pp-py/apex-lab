@@ -224,6 +224,14 @@ adentro.
   PASS con cualquier fallo que todavía no esté en la lista, empezando por un
   comando mal escrito por nosotros. Es la misma disciplina de `_sql1()`.
 
+- **APEX renombra el alias de una app importada si ya está tomado, y no
+  avisa.** El alias es único por workspace: importar con uno en uso deja la app
+  con otro (medido: `APEXLAB-ROUNDTRIP` + id 9001 -> `APEXLAB-ROUNDTRIP9001`) y
+  `apex import` responde `Import successful.` igual. Si el alias es tu marcador
+  de propiedad, la herramienta deja de reconocer su propia app. Por eso el
+  alias de `apex-roundtrip.sh` lleva el ID adentro (`APEXLAB-RT-<id>`) y la
+  pertenencia se comprueba por prefijo, no por igualdad.
+
 - **`docker cp` deja los archivos con el uid NUMÉRICO del host.** Es el bug #1
   de `docs/validacion-e2e.md` y reaparece en cualquier flujo nuevo que copie al
   contenedor: después, un `rm -rf` con el usuario del contenedor da `Permission

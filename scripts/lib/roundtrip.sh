@@ -53,12 +53,31 @@ readonly APEXLAB_ROUNDTRIP_SH=1
 
 # ID e identidad de la app de prueba. El alias es el MARCADOR DE PROPIEDAD:
 # antes de importar, el script comprueba que el ID destino esté libre o lo
-# ocupe una app con este alias. Sin eso, `apex import` sobrescribe en silencio
-# la app que haya ahí —lo dice apps.example/README.md— y este script sería la
-# forma más rápida de perder el trabajo de una tarde.
+# ocupe una app con este prefijo. Sin eso, `apex import` sobrescribe en
+# silencio la app que haya ahí —lo dice apps.example/README.md— y este script
+# sería la forma más rápida de perder el trabajo de una tarde.
+#
+# El alias lleva el ID adentro, y NO es cosmético: APEX exige alias único por
+# workspace y, si el que le pasás ya está tomado, **lo renombra solo y no
+# avisa**. Medido: importar 9001 con el alias de 9000 dejó la app con
+# `APEXLAB-ROUNDTRIP9001` y dijo `Import successful.` igual. Con un alias fijo,
+# `--id <otro>` —la salida de emergencia que este mismo script recomienda
+# cuando el ID por defecto esta ocupado— creaba una app que despues no
+# reconocia como propia y se bloqueaba a si mismo de ese ID para siempre.
 readonly RT_APP_ID_DEFAULT=9000
-readonly RT_ALIAS='APEXLAB-ROUNDTRIP'
+readonly RT_ALIAS_PREFIX='APEXLAB-RT-'
 readonly RT_APP_NAME='apex-lab roundtrip'
+
+# rt_alias_for <app_id> -> el alias que le corresponde a ese ID.
+rt_alias_for() { printf '%s%s' "${RT_ALIAS_PREFIX}" "$1"; }
+
+# rt_alias_is_ours <alias> -> 0 si la app la creo este script.
+#
+# Compara por PREFIJO, no por igualdad exacta, y eso es deliberado: si APEX
+# renombrara el alias por lo que sea, la app sigue siendo nuestra y el usuario
+# tiene que poder volver a correr el test sobre ella. La igualdad exacta la
+# exige rt_check_app_row, que es donde un renombrado SI tiene que doler.
+rt_alias_is_ours() { [[ "$1" == "${RT_ALIAS_PREFIX}"* ]]; }
 
 # Las líneas de éxito. Literales, exactas, y lo único que se acepta.
 readonly RT_MARK_VALIDATE='Validation successful.'
@@ -218,7 +237,7 @@ rt_sqlcl_conn() {
 # el test busca.
 rt_run_generate() {
   local workspace="$1" schema="$2" app_id="$3" dest="$4" log="$5"
-  rt_sqlcl_nolog "apex generate -dir ${dest} -alias ${RT_ALIAS} -id ${app_id} -name \"${RT_APP_NAME}\" -schema ${schema} -workspace ${workspace}" \
+  rt_sqlcl_nolog "apex generate -dir ${dest} -alias $(rt_alias_for "${app_id}") -id ${app_id} -name \"${RT_APP_NAME}\" -schema ${schema} -workspace ${workspace}" \
     > "${log}" 2>&1 || true
   # `apex generate` tambien sale con 0 cuando no genera nada: la unica senal
   # es esta linea. Igual que todo lo demas en esta cadena.
@@ -233,7 +252,7 @@ rt_run_validate() {
 
 rt_run_import() {
   local remote_src="$1" workspace="$2" schema="$3" app_id="$4" log="$5"
-  rt_sqlcl_conn "apex import -input ${remote_src} -workspace ${workspace} -schema ${schema} -id ${app_id} -alias ${RT_ALIAS}" \
+  rt_sqlcl_conn "apex import -input ${remote_src} -workspace ${workspace} -schema ${schema} -id ${app_id} -alias $(rt_alias_for "${app_id}")" \
     > "${log}" 2>&1 || true
 }
 
@@ -328,7 +347,11 @@ rt_check_app_row() {
   local owner="${resto%%|*}" nombre="${resto#*|}"
 
   local mal=()
-  [[ "${alias}" == "${RT_ALIAS}" ]]   || mal+=("alias=${alias} (esperado ${RT_ALIAS})")
+  local esperado; esperado="$(rt_alias_for "${app_id}")"
+  # Si no coincide, lo mas probable es que APEX lo haya renombrado por colision
+  # con otra app del workspace. Tiene que doler: la app quedo con una identidad
+  # distinta de la que el artefacto declara.
+  [[ "${alias}" == "${esperado}" ]] || mal+=("alias=${alias} (esperado ${esperado}; APEX renombra el alias si ya esta tomado en el workspace)")
   [[ "${ws}"    == "${workspace}" ]]  || mal+=("workspace=${ws} (esperado ${workspace})")
   [[ "${owner}" == "${schema}" ]]     || mal+=("parsing schema=${owner} (esperado ${schema})")
 

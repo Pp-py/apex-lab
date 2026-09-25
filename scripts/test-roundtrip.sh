@@ -166,6 +166,28 @@ igual "app.js
 icons/app-icon-32.png" "$(rt_source_statics "${APP}")" source-statics "nombres relativos y ordenados"
 igual "" "$(rt_source_statics "${TMP}/nada")" source-statics "sin static-files/ no devuelve nada"
 
+printf '\nIdentidad de la app\n\n'
+
+# --- rt_alias_for / rt_alias_is_ours -------------------------------------
+#
+# El alias lleva el ID adentro porque APEX exige alias unico por workspace y
+# renombra SOLO, sin avisar, el que ya esta tomado. Con un alias fijo, un
+# `--id <otro>` creaba una app con alias renombrado que el script despues no
+# reconocia como propia: se bloqueaba a si mismo de ese ID para siempre.
+igual "APEXLAB-RT-9000" "$(rt_alias_for 9000)" alias-for "el alias lleva el ID adentro"
+igual "APEXLAB-RT-9001" "$(rt_alias_for 9001)" alias-for "y cambia con el ID"
+if [[ "$(rt_alias_for 9000)" != "$(rt_alias_for 9001)" ]]; then
+  N_PASS=$((N_PASS+1)); printf '  %sok%s    %-22s %s\n' "${C_G}" "${C_0}" "alias-for" "dos IDs nunca comparten alias"
+else
+  N_FAIL=$((N_FAIL+1)); printf '  %sFALLO%s %-22s %s\n' "${C_R}" "${C_0}" "alias-for" "dos IDs comparten alias: APEX renombraria uno"
+fi
+
+esperado 0 alias-is-ours "reconoce una app propia"            -- rt_alias_is_ours "APEXLAB-RT-9000"
+esperado 0 alias-is-ours "y la de otro ID tambien"            -- rt_alias_is_ours "APEXLAB-RT-9001"
+esperado 1 alias-is-ours "no se apropia de una app ajena"     -- rt_alias_is_ours "MI-APP"
+esperado 1 alias-is-ours "ni de una con nombre parecido"      -- rt_alias_is_ours "APEXLAB-ROUNDTRIP"
+esperado 1 alias-is-ours "el alias vacio no es propio"        -- rt_alias_is_ours ""
+
 # ---------------------------------------------------------------------------
 printf '\n  %d pasaron' "${N_PASS}"
 [[ ${N_FAIL} -eq 0 ]] || printf ',  %s%d FALLARON%s' "${C_R}" "${N_FAIL}" "${C_0}"
