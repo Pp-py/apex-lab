@@ -259,6 +259,7 @@ Queda en `artifacts/roundtrip/` (no se versiona):
 ```
 summary.txt        PASS, o FAIL con la etapa que fallo
 roundtrip.log      la transcripcion completa de la corrida
+generate.log       salida cruda de apex generate (solo si genero la app)
 validate.log       salida cruda de apex validate
 import.log         salida cruda de apex import
 runtime.log        veredicto de cada chequeo de runtime
@@ -268,8 +269,9 @@ app-response.html  lo que devolvio la app
 ```
 
 Sale con **0** si pasó todo, y si no, con el número de la etapa: **1** validate,
-**2** import, **3** runtime, **4** smoke test. `75` es un prerequisito sin
-cumplir (stack abajo, o el ID destino es de otra app).
+**2** import, **3** runtime, **4** smoke test. Los tres que no son de etapa:
+**64** uso incorrecto, **70** falta una librería o Docker, y **75** un
+prerequisito sin cumplir (stack abajo, o el ID destino es de otra app).
 
 ### Limitaciones
 
@@ -441,9 +443,14 @@ FUTC en el repo.
 
 ## Problemas frecuentes
 
-La última columna es el chequeo de `./doctor.sh` que lo detecta. Mantenerla es
-lo que hace visible la deriva entre esta tabla y la herramienta: una fila sin
-chequeo es una oportunidad, y un chequeo sin fila es documentación que falta.
+La última columna es el chequeo de `./doctor.sh` que lo detecta, y mantenerla
+es lo que hace visible la deriva entre esta tabla y la herramienta: **una fila
+sin chequeo es una oportunidad**.
+
+Al revés no vale: esto es un índice de síntomas, no el catálogo de los 29
+chequeos. La mayoría son preventivos —`env-drift`, `sql-ascii`, `bind-addr`,
+`prereqs`— y corren *antes* de que exista un síntoma que buscar acá. El
+catálogo completo lo imprime `./doctor.sh`.
 
 | Síntoma | Causa probable | Lo detecta |
 |---|---|---|
@@ -476,6 +483,6 @@ versión de la base **obliga a `docker compose down -v`**: el volumen guarda los
 datafiles de la versión anterior y el faststart solo los copia cuando está
 vacío, así que conservarlo deja binarios nuevos sobre datafiles viejos.
 
-El plan B de la imagen oficial sigue **sin ejercitar** es el perfil `oracle` de
-`scripts/base-profile.sh`: es fallback, no el camino principal. Cuando lo
-necesites, esperá tener que ajustar algún detalle.
+Lo único que sigue **sin ejercitar** es el perfil `oracle` de
+`scripts/base-profile.sh`, el plan B de la imagen oficial: es fallback, no el
+camino principal. Cuando lo necesites, esperá tener que ajustar algún detalle.

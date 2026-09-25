@@ -7,7 +7,10 @@ método, y los siete bugs que la corrida destapó.
 Entorno de la corrida: Docker 29.7.2 sobre WSL2 (Ubuntu 24.04), ext4.
 
 El **03/09/2026 se repitió sobre la base 23.26.3** y volvió a pasar completa;
-está registrado en [Revalidación sobre 23.26.3](#revalidación-sobre-23263).
+está registrado en [Revalidación sobre 23.26.3](#revalidación-sobre-23263). El
+**25/09/2026 se rehizo entera desde cero en un sandbox** —clon limpio, build
+completo, volumen nuevo— para probar de paso `doctor.sh` y el round-trip de
+APEXlang: [Corrida desde cero del 25/09/2026](#corrida-desde-cero-del-25092026).
 
 ## Resultado
 
@@ -120,6 +123,61 @@ Dos detalles del entrypoint que salieron de leerlo:
   Es una carrera del test, no una falla del SMTP: hay que commitear (o cerrar la
   sesión) y recién ahí mirar.
 
+## Corrida desde cero del 25/09/2026
+
+Se repitió el camino completo **en un sandbox aislado**, para probar lo que
+recibe alguien que clona el repo hoy: `git clone` desde el remoto (no el árbol
+de trabajo, que oculta las divergencias del índice), `./build.sh` entero con
+descarga real de APEX, stack con volumen nuevo, y encima de eso las dos
+herramientas nuevas. Imagen bajo un tag propio y puertos separados, para no
+tocar nada del entorno de trabajo.
+
+| Punto | Resultado |
+|---|---|
+| Build completo | ✅ `exit 0` en **10 m 34 s**, SHA256 verificado, imagen 16,3 GB |
+| Siembra de `init/` | ✅ las tres semillas con el sufijo `.example` quitado y `+x` |
+| `doctor.sh --static` sobre el clon virgen | ✅ 8 OK, 9 SKIP, 0 FAIL, `exit 0` |
+| `doctor.sh` tras el build | ✅ **29 OK, 0 WARN, 0 FAIL, 0 SKIP** |
+| Roturas provocadas, estáticas | ✅ 15/15 detectadas con el estado correcto |
+| Roturas provocadas, de runtime | ✅ 6/6 |
+| `apex-roundtrip.sh` | ✅ PASS, idempotente, y cada código de salida provocado |
+| Modo proyecto (receta del README) | ✅ 22 OK / 7 SKIP / 0 FAIL + round-trip PASS |
+
+Los **10 m 34 s** no se comparan con los 6 m 58 s de la primera corrida ni con
+los 14 m 52 s de la segunda: acá la imagen base ya estaba local pero el zip de
+APEX se descargó de nuevo (326 MB).
+
+### Dos bugs que destapó, los dos de las herramientas nuevas
+
+1. **`--id <otro>` del round-trip era una puerta de un solo sentido.** APEX
+   exige alias único por workspace y **renombra solo, sin avisar**, el que ya
+   esté tomado: importar la app 9001 con el alias de la 9000 la dejó como
+   `APEXLAB-ROUNDTRIP9001` y `apex import` contestó `Import successful.` igual.
+   Como el alias era el marcador de propiedad, la corrida siguiente no
+   reconocía su propia app y la rechazaba — justo en la salida de emergencia
+   que el propio script recomienda. Arreglado metiendo el ID en el alias
+   (`APEXLAB-RT-<id>`) y comparando la pertenencia por prefijo.
+
+2. **La receta de "Un proyecto nuevo" no copiaba `scripts/apex-roundtrip.sh`.**
+   El proyecto derivado se llevaba `scripts/lib/roundtrip.sh` y no el
+   ejecutable que la usa.
+
+### Tres hallazgos que resultaron ser del método, no del entorno
+
+Van acá por la misma razón que las "dos trampas al verificar" de más abajo: al
+que repita esto le van a pasar.
+
+- **`mailpit-http` reporta `[SKIP]`, no `[FAIL]`, con el servicio caído**, y es
+  deliberado: `containers-health` ya nombra la causa, y los chequeos HTTP no
+  apilan un segundo fallo por lo mismo. Vale igual para `builder-http` y
+  `ords-statics-http`.
+- **Un fixture de `sql-ascii` con una palabra sin tilde no prueba nada.** El
+  chequeo dio `[OK]` porque el texto era ASCII de verdad.
+- **`DBMS_NETWORK_ACL_ADMIN.revoke_privilege` no existe en 23c**: da
+  `PLS-00302`. La API es `remove_host_ace`. El `revoke` nunca corrió y `app-acl`
+  reportaba `[OK]` con razón; se descubrió recién al dejar de mandar la salida
+  del bloque PL/SQL a `/dev/null`.
+
 ## Bugs que la corrida destapó
 
 Ninguno era detectable sin ejecutar. Los seis primeros abortaban o degradaban el
@@ -183,15 +241,25 @@ Al migrar hay que actualizar además los ejemplos del README: `createAppUser` y
 
 ```bash
 ./build.sh && docker compose up -d
+./doctor.sh                      # 29 chequeos
+./scripts/apex-roundtrip.sh      # APEXlang -> import -> app corriendo
 ```
 
-Después, en orden de valor:
+**Los tres primeros puntos de esta lista eran manuales hasta que `doctor.sh`
+existió**, y hoy los cubre él: los estáticos del Builder (`ords-statics-http`),
+Mailpit (`mailpit-http`) y la ACL de un esquema propio (`app-acl`). No los
+repitas a mano; si el doctor sale 0, están.
 
-1. http://localhost:8080/ords/apex **con estilos** (si carga en texto plano, el
-   montaje de `./cache/apex` en ORDS está mal).
-2. http://localhost:8025 responde (Mailpit).
-3. Los `DBMS_OUTPUT` del build aparecen: `Cuenta ADMIN creada.`,
+Lo que **ninguna** de las dos herramientas cubre, y sigue mirándose a ojo:
+
+1. Que los `DBMS_OUTPUT` del build aparezcan: `Cuenta ADMIN creada.`,
    `Esquema de APEX detectado: APEX_...`, `APEX instalado y validado correctamente.`
-   Si el build es mudo, el punto 6 volvió.
-4. Llamada saliente real desde un esquema propio, tras aplicar la receta de
-   [`init/README.md`](../init/README.md).
+   Si el build es mudo, el bug 6 volvió. Es del build, no del entorno ya
+   levantado, así que ningún chequeo posterior lo ve.
+2. Que el Builder cargue **con estilos en el navegador**. `ords-statics-http`
+   comprueba que ORDS sirve el CSS con su content-type, que es lo que falla en
+   la práctica, pero no que la página se vea bien.
+
+La receta de la ACL para un esquema propio está en
+[`init.example/README.md`](../init.example/README.md) — `init/` no se versiona,
+así que en un clon recién hecho solo existe la plantilla.

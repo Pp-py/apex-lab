@@ -254,6 +254,11 @@ build en 6 m 58 s, APEX 26.1 VALID, ORDS sirviendo el Builder con estáticos,
 correo cayendo en Mailpit y ACLs funcionando. **Revalidado el 03/09/2026** sobre
 la base 23.26.3, sin bugs nuevos.
 
+**Repetido desde cero el 25/09/2026** en un sandbox aislado —clon desde el
+remoto, build entero (10 m 34 s), volumen nuevo—: `./doctor.sh` da 29/29 y
+`./scripts/apex-roundtrip.sh` PASS, también en modo proyecto. Destapó dos bugs
+de las herramientas nuevas, los dos ya corregidos.
+
 **Subir la versión de la base obliga a `docker compose down -v`.** El volumen
 guarda los datafiles de la versión anterior y el faststart solo los copia cuando
 está vacío: conservarlo deja binarios nuevos sobre datafiles viejos, sin el
