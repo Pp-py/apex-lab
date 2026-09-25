@@ -85,6 +85,53 @@ check_init_example_integrity() {
   _ok "las plantillas de init.example/ conservan el bit de ejecucion"
 }
 
+# El bit de ejecucion que git REGISTRA, que no siempre es el que ves en el disco.
+#
+# Este repo tiene core.fileMode=false, asi que git ignora el modo del
+# filesystem: un `chmod +x` local no llega nunca al indice y el archivo viaja a
+# 644 para todos los que clonen. En tu maquina se ve bien y en el clon no
+# arranca, que es la peor combinacion posible para diagnosticar.
+#
+# No es teorico, paso dos veces en este repo: las tres plantillas de
+# init.example/ estuvieron a 644 en git desde el primer commit —contradiciendo
+# a su propio README, que promete que "ya vienen con el bit puesto"— y doctor.sh
+# y test-doctor.sh se publicaron sin el bit y rompieron CI con
+# "Permission denied".
+#
+# Por eso el chequeo compara indice contra disco en vez de tener una lista de
+# archivos que "deberian" ser ejecutables: el disco es la intencion de quien
+# hizo el chmod, y la divergencia es justo lo que core.fileMode oculta.
+check_git_exec_bit() {
+  local repo="$1"
+  command -v git >/dev/null 2>&1 || _skip "sin git en el PATH" || return 3
+  git -C "${repo}" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+    || _skip "no es un repositorio git (modo proyecto)" || return 3
+
+  local falta_x=() sobra_x=() mode path disco
+  while read -r mode _ _ path; do
+    [[ -f "${repo}/${path}" ]] || continue
+    if [[ -x "${repo}/${path}" ]]; then disco=100755; else disco=100644; fi
+    [[ "${mode}" == "${disco}" ]] && continue
+    if [[ "${disco}" == "100755" ]]; then falta_x+=("${path}"); else sobra_x+=("${path}"); fi
+  done < <(git -C "${repo}" ls-files -s)
+
+  if [[ ${#falta_x[@]} -gt 0 ]]; then
+    _fail "Archivos ejecutables en disco pero a 644 en el indice de git:
+   ${falta_x[*]}
+   Con core.fileMode=false el chmod local no llega al indice: quien clone los
+   recibe sin el bit. Un .sh de init/ asi no se ejecuta, se SOURCEA, y esa rama
+   del entrypoint tiene un bug de upstream que lo vuelve ilegible." \
+      "git update-index --chmod=+x ${falta_x[*]}"
+    return 1
+  fi
+  if [[ ${#sobra_x[@]} -gt 0 ]]; then
+    _warn "Archivos a 755 en el indice de git pero no ejecutables en disco:
+   ${sobra_x[*]}" "git update-index --chmod=-x ${sobra_x[*]}"
+    return 2
+  fi
+  _ok "el bit de ejecucion del indice de git coincide con el del disco"
+}
+
 # El SHA256 fijado es la única defensa contra que Oracle re-publique el zip con
 # el mismo nombre. Si el de cache ya no coincide, el próximo build aborta.
 check_apex_sha() {

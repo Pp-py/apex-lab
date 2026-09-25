@@ -167,9 +167,11 @@ main() {
   if [[ "${MODE}" == "repo" ]]; then
     run_check sql-ascii            check_sql_ascii "${SCRIPT_DIR}"
     run_check init-example-integrity check_init_example_integrity "${SCRIPT_DIR}/init.example"
+    run_check git-exec-bit         check_git_exec_bit "${SCRIPT_DIR}"
   else
     run_check sql-ascii            skip_en_proyecto
     run_check init-example-integrity skip_en_proyecto
+    run_check git-exec-bit         skip_en_proyecto
   fi
 
   section "Stack declarado (compose e init)"
