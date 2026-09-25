@@ -43,11 +43,14 @@ versions.env                única fuente de verdad de versiones y credenciales
 scripts/
 ├── base-profile.sh         convenciones por imagen base (se sourcea)
 ├── install-apex.sh         corre DENTRO del contenedor de build
+├── apex-roundtrip.sh       valida el round-trip de una app APEXlang
 ├── test-doctor.sh          self-test de doctor.sh contra fixtures rotas
+├── test-roundtrip.sh       self-test de los parsers de SQLcl
 └── lib/                    chequeos compartidos por build.sh y doctor.sh
     ├── checks.sh           constantes + lo que build.sh también usa
     ├── checks-env.sh       chequeos estáticos
-    └── checks-runtime.sh   chequeos contra el stack levantado
+    ├── checks-runtime.sh   chequeos contra el stack levantado
+    └── roundtrip.sh        etapas y parsers del round-trip
 sql/
 ├── 10_apex_instance.sql    cuenta ADMIN, SMTP, parámetros de instancia
 └── 20_network_acl.sql      ACLs de red del engine de APEX
@@ -149,6 +152,9 @@ mkdir -p apps && docker cp apexlab-ords:/tmp/apexlang/<alias> apps/<alias>
 Ojo con un detalle que no se adivina: **SQLcl está en el contenedor de ORDS, no
 en el de la base.** Y ahí la base se llama `db`, no `localhost`.
 
+Que lo exportado **vuelva a entrar** lo comprueba
+[`./scripts/apex-roundtrip.sh`](#round-trip-de-una-app-scriptsapex-roundtripsh).
+
 → [`apps.example/README.md`](apps.example/README.md)
 
 ---
@@ -190,6 +196,86 @@ Que los chequeos de verdad detecten lo que dicen lo verifica
 `./scripts/test-doctor.sh`, que arma directorios rotos a propósito y comprueba
 cada código de salida. Un chequeo que devuelve `[OK]` porque su `grep` está mal
 escrito es peor que no tenerlo.
+
+---
+
+## Round-trip de una app: `./scripts/apex-roundtrip.sh`
+
+Exportar una app a APEXlang es fácil de verificar a ojo; que vuelva a entrar,
+no. Este script cierra el ciclo y lo deja ejecutable:
+
+```
+fuente .apx -> apex validate -> apex import -> app corriendo -> smoke test
+```
+
+```bash
+./scripts/apex-roundtrip.sh              # genera la app de referencia y la prueba
+./scripts/apex-roundtrip.sh apps/mi-app  # prueba un arbol APEXlang propio
+./scripts/apex-roundtrip.sh --help       # opciones y codigos de salida
+```
+
+Sin argumentos usa la app que genera **el propio SQLcl** (`apex generate`), no
+un fixture versionado: así el árbol siempre coincide con la versión de APEXlang
+instalada en vez de quedar desactualizado en el próximo upgrade.
+
+### Qué valida
+
+| Etapa | Qué comprueba |
+|---|---|
+| **validate** | El APEXlang compila. Corre sin base |
+| **import** | Entra en la instancia. Antes verifica que el ID destino no sea de otra app |
+| **runtime** | APEX `VALID`, ORDS responde, y la fila de `apex_applications` tiene el alias, el workspace y el esquema de parseo pedidos |
+| **fidelidad** | Las páginas y los static files que quedaron en la base coinciden —en cantidad y en nombre— con los del árbol de origen |
+| **smoke** | La app se sirve de verdad: `f?p=<id>:1` devuelve HTML con el nombre de la app, y un static file suyo baja con su content-type |
+
+**El código HTTP y el exit code no alcanzan, y esa es la razón de ser del
+script.** Medido contra ORDS 26.1.2: `apex validate` sale con `0` aunque el
+`.apx` no compile, `apex import` sale con `0` aunque no pueda ni conectar, y
+una app a la que le falta la página de inicio responde **HTTP 200** con "Sorry,
+this page isn't available". Por eso cada etapa exige una señal positiva —la
+línea de éxito literal, el nombre de la app dentro del HTML— en vez de buscar
+errores conocidos.
+
+### Prerequisitos
+
+El stack tiene que estar **levantado** (`db` y `ords`; Mailpit no hace falta).
+El script no lo levanta ni lo baja, no borra apps y no toca el `.env`. Lo único
+que escribe es la app destino y su directorio de evidencia.
+
+Por defecto importa en el **ID 9000** con el alias `APEXLAB-ROUNDTRIP`. Si ese
+ID ya lo ocupa otra app, **aborta**: `apex import` sobrescribe sin preguntar y
+no hay deshacer. Para forzarlo, `--force`; para usar otro ID, `--id`.
+
+### Evidencia
+
+Queda en `artifacts/roundtrip/` (no se versiona):
+
+```
+summary.txt        PASS, o FAIL con la etapa que fallo
+roundtrip.log      la transcripcion completa de la corrida
+validate.log       salida cruda de apex validate
+import.log         salida cruda de apex import
+runtime.log        veredicto de cada chequeo de runtime
+smoke-test.log     veredicto de cada peticion HTTP
+app/               copia exacta del arbol que se valido e importo
+app-response.html  lo que devolvio la app
+```
+
+Sale con **0** si pasó todo, y si no, con el número de la etapa: **1** validate,
+**2** import, **3** runtime, **4** smoke test. `75` es un prerequisito sin
+cumplir (stack abajo, o el ID destino es de otra app).
+
+### Limitaciones
+
+- **No re-exporta para diffear contra el origen.** `generate` y `export`
+  normalizan distinto y el diff sería ruido. La fidelidad se mide contra el
+  diccionario de datos, que no depende del formato del texto.
+- **No inicia sesión.** Verifica que la app se sirve, no que un usuario pueda
+  operarla: eso necesitaría credenciales y dejaría de ser determinista.
+- **Atado a la versión de APEXlang del SQLcl instalado.** Un `.apx` exportado
+  con otra versión puede no validar; es una propiedad del formato.
+- El round-trip completo **no corre en CI** (necesita la base). Sí corren el
+  self-test de los parsers y la etapa `validate` contra el SQLcl real.
 
 ---
 
@@ -365,6 +451,7 @@ chequeo es una oportunidad, y un chequeo sin fila es documentación que falta.
 | Las semillas de `init/` no tuvieron efecto | Quedaron con el sufijo `.example`, o sin `+x`, o montadas en `initdb.d` | `init-inert-example`, `init-exec-bit`, `seed-dir-mount`, `init-ran` |
 | La base abre pero le falta el `datapatch` | Subiste la versión conservando el volumen: datafiles viejos bajo binarios nuevos | `datapatch-pending` |
 | Un `.sh` del repo llega sin permiso de ejecución al clonar | `core.fileMode=false`: el `chmod +x` local nunca llegó al índice de git | `git-exec-bit` |
+| Una app importada de APEXlang no abre, o abre sin sus imágenes | El import dijo `Import successful.` igual: APEX devuelve 200 con "Sorry, this page isn't available" | `./scripts/apex-roundtrip.sh` |
 | `docker compose up` tarda en el primer arranque | Se copian los datafiles (~4,5 GB) al volumen. Solo ocurre una vez por proyecto | — (es normal) |
 
 ---

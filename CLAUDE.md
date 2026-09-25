@@ -30,6 +30,10 @@ docker compose down -v  # destruye la base
 ./doctor.sh --static    # solo los que no necesitan Docker (los que corren en CI)
 ./scripts/test-doctor.sh  # self-test del doctor contra fixtures rotas
 
+./scripts/apex-roundtrip.sh          # APEXlang -> validate -> import -> smoke test
+./scripts/apex-roundtrip.sh apps/x   # sobre un arbol propio en vez del generado
+./scripts/test-roundtrip.sh          # self-test de los parsers, sin Docker
+
 KEEP_ON_ERROR=1 ./build.sh    # no borra el contenedor de build si falla
 ALLOW_ENV_DRIFT=1 ./build.sh  # sigue aunque .env difiera de versions.env
 ```
@@ -55,9 +59,12 @@ doctor.sh                 entry point del diagnóstico (también en la raíz)
 scripts/base-profile.sh   convenciones por imagen base (se sourcea, no se ejecuta)
 scripts/install-apex.sh   corre DENTRO del contenedor de build
 scripts/test-doctor.sh    self-test de doctor.sh con fixtures rotas
+scripts/apex-roundtrip.sh entry point del round-trip de APEXlang
+scripts/test-roundtrip.sh self-test de los parsers de SQLcl, sin Docker
 scripts/lib/checks.sh     constantes + chequeos que build.sh Y doctor.sh usan
 scripts/lib/checks-env.sh chequeos estáticos del doctor
 scripts/lib/checks-runtime.sh  chequeos contra el stack levantado
+scripts/lib/roundtrip.sh  etapas y parsers del round-trip
 sql/                      post-configuración de APEX, se copia al contenedor
 init.example/             plantilla de semillas; build.sh siembra ./init (no versionado)
 apps.example/             donde van las apps exportadas; ./apps no se versiona
@@ -202,6 +209,30 @@ adentro.
   ```
 
   Lo vigila el chequeo `git-exec-bit`, que compara el índice contra el disco.
+
+- **Toda la familia de comandos `apex` de SQLcl sale con `0` cuando falla.**
+  Medido contra `ords:26.1.2`, no deducido: `apex validate` con errores de
+  sintaxis, `apex validate` sobre un directorio inexistente, una opción mal
+  escrita, `apex import` a un workspace que no existe y `apex import` sin poder
+  conectar (`ORA-01017`) devuelven **todos rc=0**. Ni `whenever sqlerror exit
+  failure` ni `-exitwhendone` cambian nada. Y APEX completa el cuadro por HTTP:
+  una app a la que le falta la página de inicio responde **200** con "Sorry,
+  this page isn't available".
+
+  Por eso `scripts/lib/roundtrip.sh` usa **allowlist positiva** —la línea de
+  éxito literal, y nada más— y no un grep de errores conocidos: una denylist da
+  PASS con cualquier fallo que todavía no esté en la lista, empezando por un
+  comando mal escrito por nosotros. Es la misma disciplina de `_sql1()`.
+
+- **`docker cp` deja los archivos con el uid NUMÉRICO del host.** Es el bug #1
+  de `docs/validacion-e2e.md` y reaparece en cualquier flujo nuevo que copie al
+  contenedor: después, un `rm -rf` con el usuario del contenedor da `Permission
+  denied` sobre lo que uno mismo copió. Si hay que limpiar, `docker exec -u 0`.
+
+  Del mismo comando: `docker cp dir contenedor:destino` **anida** el directorio
+  adentro si `destino` ya existe, y vuelca su contenido si no. Dos resultados
+  distintos para el mismo comando según el estado previo. La forma
+  determinística es crear el destino y copiar `origen/.`.
 
 - **`init/` está en `.gitignore` a propósito**: ahí va el DDL y los datos de cada
   proyecto, que no deben subir a este repo. Lo versionado es `init.example/`, y

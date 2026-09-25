@@ -71,6 +71,14 @@ el esquema de parseo coincida, o reasignarlo en la importación. En este lab el
 esquema y el workspace salen del `.env` (`APP_SCHEMA`, `APP_WORKSPACE`), así que
 lo normal es que coincidan si no los cambiaste.
 
-**Sin verificar en este entorno:** el round-trip. La app 100 se exportó y se
-inspeccionó, pero no se re-importó, porque importar sobre el mismo ID sobrescribe
-la app. Si lo probás, hacelo con un ID distinto.
+**El round-trip está verificado**, y de forma ejecutable:
+
+```bash
+./scripts/apex-roundtrip.sh apps/<alias>
+```
+
+valida el APEXlang, lo importa, y comprueba contra el diccionario y contra HTTP
+que la app quedó completa y se sirve. Usa el ID 9000 con un alias propio, así
+que **no toca tu app**: importar sobre el mismo ID la sobrescribe sin preguntar
+y no hay deshacer. Ver la sección
+[Round-trip](../README.md#round-trip-de-una-app-scriptsapex-roundtripsh).
