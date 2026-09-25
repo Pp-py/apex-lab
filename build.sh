@@ -24,18 +24,12 @@ readonly BUILD_CONTAINER="apex-lab-build"
 readonly APEX_INSTALL_TIMEOUT=3600
 # DB_READY_TIMEOUT lo define scripts/base-profile.sh según la imagen base.
 
-# Claves de .env que NO se editan a mano: se derivan de versions.env y del
-# perfil de imagen. Ver sync_env().
-readonly DERIVED_KEYS=(
-  APEX_DB_IMAGE ORDS_TAG ORACLE_PASSWORD DB_HEALTHCHECK_CMD DB_SEED_DIR
-)
-
-# Charset permitido en las contraseñas de build. Las contraseñas viajan a los
-# .sql por sustitución de SQL*Plus y como parámetro posicional de
-# apex_rest_config.sql: un '&', una comilla, un espacio o un backslash las parte
-# en dos y la imagen queda con una contraseña distinta de la documentada, sin
-# error visible hasta el primer login.
-readonly PASSWORD_SAFE_CHARS='A-Za-z0-9_.#%+=:,@^~*()!?/-'
+# Constantes y chequeos compartidos con doctor.sh: DERIVED_KEYS,
+# PASSWORD_SAFE_CHARS, derived_value(), env_value() y los check_* que más abajo
+# se envuelven en `|| die`. Viven ahí y no acá para que doctor.sh los use sin
+# copiarlos: un invariante del entorno se escribe una sola vez.
+# shellcheck source=scripts/lib/checks.sh
+source "${SCRIPT_DIR}/scripts/lib/checks.sh"
 
 log()  { printf '\033[1;34m[apex-lab]\033[0m %s\n' "$*" >&2; }
 warn() { printf '\033[1;33m[apex-lab] WARN:\033[0m %s\n' "$*" >&2; }
@@ -61,77 +55,35 @@ trap cleanup EXIT
 # 0. Precondiciones
 # --------------------------------------------------------------------------
 
-# El perfil define convenciones (variable de contraseña, healthcheck, initdb dir)
-# que solo valen para su familia de imágenes. Cruzarlos no falla acá: falla más
-# tarde y de forma oscura — el healthcheck no existe, la variable de contraseña
-# se ignora y la base arranca con una contraseña que nadie eligió.
+# Los chequeos viven en scripts/lib/checks.sh y no imprimen: devuelven un
+# código y dejan el texto en CHECK_DETAIL. Acá se los envuelve en `|| die`,
+# que es la única diferencia con el uso que les da doctor.sh —el mismo
+# chequeo, una política distinta—.
 validate_profile() {
-  case "${DB_IMAGE_PROFILE}" in
-    gvenzl)
-      [[ "${DB_BASE_IMAGE}" == gvenzl/* ]] || die \
-        "DB_IMAGE_PROFILE='gvenzl' pero DB_BASE_IMAGE='${DB_BASE_IMAGE}'.
-   El perfil gvenzl espera una imagen 'gvenzl/*'. Revisá versions.env."
-      ;;
-    oracle)
-      [[ "${DB_BASE_IMAGE}" == container-registry.oracle.com/* ]] || die \
-        "DB_IMAGE_PROFILE='oracle' pero DB_BASE_IMAGE='${DB_BASE_IMAGE}'.
-   El perfil oracle espera una imagen 'container-registry.oracle.com/*'.
-   Revisá versions.env."
-      ;;
-  esac
+  check_profile_match || die "${CHECK_DETAIL}"
 }
 
 validate_passwords() {
-  local name value
+  local name
   for name in BUILD_ORACLE_PASSWORD BUILD_APEX_ADMIN_PASSWORD; do
-    value="${!name:-}"
-    [[ -n "${value}" ]] || die "${name} está vacío en versions.env."
-    if [[ "${value}" =~ [^${PASSWORD_SAFE_CHARS}] ]]; then
-      die "${name} contiene caracteres que rompen la sustitución de SQL*Plus.
-   Permitidos: ${PASSWORD_SAFE_CHARS}
-   Prohibidos en particular: & \" ' \\ \$ y espacios. Elegí otra en versions.env."
-    fi
+    check_build_password "${name}" "${!name:-}" || die "${CHECK_DETAIL}"
   done
-}
-
-# Avisa si a un filesystem le falta espacio. No aborta: df no siempre reporta
-# bien montajes de Docker Desktop u overlays remotos, y un falso negativo no
-# justifica bloquear el build.
-check_free_space() {
-  local path="$1" need_gb="$2" label="$3" free_gb
-  free_gb=$(df -Pk "${path}" 2>/dev/null | awk 'NR==2 {printf "%d", $4/1024/1024}') || return 0
-  [[ -n "${free_gb}" ]] || return 0
-  if [[ ${free_gb} -lt ${need_gb} ]]; then
-    warn "Solo ${free_gb} GB libres en ${path} (${label}). Se recomiendan >= ${need_gb} GB."
-  fi
 }
 
 check_prereqs() {
-  local missing=()
-  for cmd in docker curl unzip; do
-    command -v "${cmd}" >/dev/null 2>&1 || missing+=("${cmd}")
-  done
-  if command -v sha256sum >/dev/null 2>&1; then
-    SHA_CMD="sha256sum"
-  elif command -v shasum >/dev/null 2>&1; then
-    SHA_CMD="shasum -a 256"
-  else
-    missing+=("sha256sum|shasum")
-  fi
-  [[ ${#missing[@]} -eq 0 ]] || die "Faltan comandos: ${missing[*]}"
-
-  docker info >/dev/null 2>&1 || die "El daemon de Docker no responde."
+  check_required_commands || die "${CHECK_DETAIL}"
+  check_docker_daemon     || die "${CHECK_DETAIL}"
 
   # El build consume disco en DOS filesystems distintos, y no tienen por qué ser
   # el mismo: el data-root de Docker (imagen base + capa nueva, ~20 GB) y ./cache
   # en el repo (zip de APEX + extraído, ~3 GB). Medir solo el repo es el error
   # clásico: el chequeo pasa y el build muere sin espacio horas después.
-  check_free_space "${SCRIPT_DIR}" 3 "cache del instalador"
+  check_free_space "${SCRIPT_DIR}" 3 "cache del instalador" || warn "${CHECK_DETAIL}"
 
   local docker_root
   docker_root=$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || true)
   if [[ -n "${docker_root}" && -d "${docker_root}" ]]; then
-    check_free_space "${docker_root}" 20 "imágenes de Docker"
+    check_free_space "${docker_root}" 20 "imágenes de Docker" || warn "${CHECK_DETAIL}"
   else
     warn "No se pudo inspeccionar el data-root de Docker${docker_root:+ (${docker_root})}."
     warn "Verificá a mano que haya >= 20 GB libres para las imágenes."
@@ -149,23 +101,9 @@ check_prereqs() {
 # No se sobrescribe un .env existente: ahí viven tus puertos y tu
 # COMPOSE_PROJECT_NAME, que son legítimamente por-proyecto.
 # --------------------------------------------------------------------------
-derived_value() {
-  case "$1" in
-    APEX_DB_IMAGE)      printf '%s' "${IMAGE_NAME}:${IMAGE_TAG}" ;;
-    ORDS_TAG)           printf '%s' "${ORDS_TAG}" ;;
-    ORACLE_PASSWORD)    printf '%s' "${BUILD_ORACLE_PASSWORD}" ;;
-    DB_HEALTHCHECK_CMD) printf '%s' "${DB_HEALTHCHECK_CMD}" ;;
-    DB_SEED_DIR)        printf '%s' "${DB_SEED_DIR}" ;;
-    *)                  die "derived_value: clave desconocida '$1'" ;;
-  esac
-}
-
-# Lee una clave de un archivo .env. La última aparición gana, igual que docker
-# compose. Ignora las líneas comentadas.
-env_value() {
-  local key="$1" file="$2"
-  sed -n "s/^[[:space:]]*${key}=//p" "${file}" | tail -1
-}
+# derived_value() y env_value() viven en scripts/lib/checks.sh: doctor.sh los
+# necesita igual y son la definición de qué valor le corresponde a cada clave.
+# set_env_key() se queda acá: escribe, y el doctor nunca escribe.
 
 # Reescribe (o agrega al final) una clave, sin tocar el resto del archivo.
 set_env_key() {
@@ -199,23 +137,16 @@ sync_env() {
     return 0
   fi
 
-  local drift=() expected actual
-  for key in "${DERIVED_KEYS[@]}"; do
-    expected="$(derived_value "${key}")"
-    actual="$(env_value "${key}" "${env_file}")"
-    [[ "${actual}" == "${expected}" ]] \
-      || drift+=("${key}=${expected}     <- en .env dice: ${actual:-<ausente>}")
-  done
+  local rc=0
+  check_env_drift "${env_file}" || rc=$?
 
-  if [[ ${#drift[@]} -gt 0 ]]; then
+  if [[ ${rc} -ne 0 ]]; then
     if [[ "${ALLOW_ENV_DRIFT:-0}" == "1" ]]; then
-      warn "ALLOW_ENV_DRIFT=1: se ignoran ${#drift[@]} divergencias en .env."
-      printf '       %s\n' "${drift[@]}" >&2
+      warn "ALLOW_ENV_DRIFT=1: se ignoran ${#CHECK_ITEMS[@]} divergencias en .env."
+      printf '       %s\n' "${CHECK_ITEMS[@]}" >&2
       return 0
     fi
-    die "El .env divergió de versions.env. Corregí estas líneas en ${env_file}:
-
-$(printf '       %s\n' "${drift[@]}")
+    die "${CHECK_DETAIL}
    Se aborta antes del build y no se toca .env, para no pisar tus
    puertos ni COMPOSE_PROJECT_NAME. Para seguir igual: ALLOW_ENV_DRIFT=1 ./build.sh"
   fi
@@ -248,7 +179,8 @@ seed_init_dir() {
   # Copiadas tal cual, las tres semillas quedan INERTES y el proyecto arranca
   # sin workspace, sin esquema y sin ACL — sin un solo mensaje de error. El
   # sufijo existe para que las plantillas versionadas no corran; dentro de
-  # init/ ya no tiene sentido.
+  # init/ ya no tiene sentido. El chequeo `init-inert-example` de doctor.sh
+  # cubre el caso de que alguien copie a mano y se olvide.
   local seed
   for seed in "${init_dir}"/*.example; do
     # Un glob sin match se expande a sí mismo: sin esto se intentaría mover
