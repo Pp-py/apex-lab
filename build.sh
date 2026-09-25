@@ -242,6 +242,21 @@ seed_init_dir() {
   fi
   log "No existe ./init: sembrándolo desde init.example/."
   cp -R "${example_dir}" "${init_dir}"
+
+  # Y renombrar, quitando el sufijo. El entrypoint SOLO ejecuta *.sh, *.sql,
+  # *.sql.zip y *.sql.gz; cualquier otro nombre lo loguea como `ignoring`.
+  # Copiadas tal cual, las tres semillas quedan INERTES y el proyecto arranca
+  # sin workspace, sin esquema y sin ACL — sin un solo mensaje de error. El
+  # sufijo existe para que las plantillas versionadas no corran; dentro de
+  # init/ ya no tiene sentido.
+  local seed
+  for seed in "${init_dir}"/*.example; do
+    # Un glob sin match se expande a sí mismo: sin esto se intentaría mover
+    # un archivo llamado literalmente '*.example'.
+    [[ -e "${seed}" ]] || continue
+    mv "${seed}" "${seed%.example}"
+  done
+  log "Semillas listas en ./init (sufijo .example quitado)."
 }
 
 # --------------------------------------------------------------------------
