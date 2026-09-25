@@ -23,4 +23,9 @@ init/
 #
 # Si una app SI quiere versionarse, va en el repo de esa app, no aca.
 apps/
+
+# Evidencia de ./scripts/apex-roundtrip.sh. Se regenera en cada corrida y trae
+# una copia entera de la app bajo prueba: es salida, no fuente.
+artifacts/
+
 .claude/settings.local.json
