@@ -17,10 +17,16 @@ on:
   push:
     paths:
       - "**.sh"
+      - "compose.yml"
+      - ".env.example"
+      - "sql/**"
       - ".github/workflows/check-upstream.yml"
   pull_request:
     paths:
       - "**.sh"
+      - "compose.yml"
+      - ".env.example"
+      - "sql/**"
 
 # Los permisos van por job, no acá: el lint solo lee el repo y no tiene por qué
 # heredar el `issues: write` que necesita el otro job.
@@ -42,11 +48,35 @@ jobs:
         run: |
           set -Eeuo pipefail
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
-          # -x sigue los `source` para que resuelva scripts/base-profile.sh.
-          shellcheck -x build.sh scripts/*.sh
+          # -x sigue los `source` para que resuelva base-profile.sh y lib/.
+          shellcheck -x build.sh doctor.sh scripts/*.sh scripts/lib/*.sh
 
       - name: Sintaxis de los .sh restantes
-        run: bash -n build.sh scripts/*.sh
+        run: bash -n build.sh doctor.sh scripts/*.sh scripts/lib/*.sh
+
+  # El build no corre en CI, pero los chequeos estaticos del doctor si, y eso
+  # cubre reglas que hasta ahora no verificaba nadie: la de SQL 100 % ASCII la
+  # documentaba CLAUDE.md con un `grep` que habia que acordarse de correr.
+  #
+  # El self-test va PRIMERO y a proposito: arma directorios rotos y comprueba
+  # que cada chequeo los detecte. Sin el, `doctor.sh --static` saliendo 0 no
+  # probaria nada —un chequeo con el grep mal escrito tambien sale 0—.
+  #
+  # Sobre un checkout limpio no hay .env, ni init/, ni cache/: los genera
+  # ./build.sh. Esos chequeos reportan [SKIP] y el job pasa; lo que quede en
+  # [FAIL] es un problema real del repo.
+  doctor:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Self-test de doctor.sh contra fixtures rotas
+        run: ./scripts/test-doctor.sh
+
+      - name: Chequeos estaticos sobre el checkout
+        run: ./doctor.sh --static
 
   check:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
