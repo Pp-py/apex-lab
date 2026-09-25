@@ -352,6 +352,14 @@ commit_image() {
   size=$(docker images --format '{{.Size}}' "${full_tag}" | head -1)
   size="${size:-desconocido}"
 
+  # Los puertos salen del .env, no de un literal. Son legítimamente por-proyecto
+  # —el README manda cambiarlos para correr varios en paralelo— y un mensaje
+  # final que siempre dijera 8080 mandaría al usuario al stack de otro proyecto,
+  # o al de otra persona. Los defaults son los mismos que aplica compose.yml.
+  local ords_port db_port
+  ords_port="$(env_value ORDS_PORT "${SCRIPT_DIR}/.env")"; ords_port="${ords_port:-8080}"
+  db_port="$(env_value DB_PORT "${SCRIPT_DIR}/.env")";     db_port="${db_port:-1521}"
+
   cat >&2 <<EOF
 
   ────────────────────────────────────────────────────────────────
@@ -361,9 +369,9 @@ commit_image() {
   Arrancar el stack completo (BD + ORDS + Mailpit):
       docker compose up -d
 
-  APEX Builder:  http://localhost:8080/ords/apex
+  APEX Builder:  http://localhost:${ords_port}/ords/apex
     Workspace INTERNAL / ADMIN / ${BUILD_APEX_ADMIN_PASSWORD}
-  Conexión SQL:  system/${BUILD_ORACLE_PASSWORD}@localhost:1521/FREEPDB1
+  Conexión SQL:  system/${BUILD_ORACLE_PASSWORD}@localhost:${db_port}/FREEPDB1
   ────────────────────────────────────────────────────────────────
 
 EOF

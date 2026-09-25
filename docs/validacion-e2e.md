@@ -25,7 +25,7 @@ APEXlang: [Corrida desde cero del 25/09/2026](#corrida-desde-cero-del-25092026).
 | Estáticos `/i/` | ✅ CSS, JS e iconos con 200 y content-type correcto | `curl /i/apex_ui/css/Core.min.css` → `200 text/css` |
 | ACLs del engine | ✅ otorgadas a `APEX_260100` y `APEX_REST_PUBLIC_USER` | `dba_host_aces` |
 | ACL de esquema de app | ✅ receta verificada | sin ACL falla, con ACL `status=200` |
-| SMTP → Mailpit | ✅ correo real capturado | `APEX_MAIL.send` + `push_queue` → API de Mailpit |
+| SMTP → Mailpit | ✅ correo real capturado | `APEX_MAIL.send` → cola → job → API de Mailpit (ojo: el job corre cada 5 min, ver [trampas](#dos-trampas-al-verificar-no-del-entorno)) |
 | Idempotencia del SQL | ✅ 2 pasadas seguidas `rc=0` | rama `create_user` y rama `edit_user` |
 | `sync_env()` | ✅ genera y detecta deriva | 1ª corrida genera `.env`, 2ª valida |
 
@@ -118,10 +118,40 @@ Dos detalles del entrypoint que salieron de leerlo:
   "la cola está vacía" no prueba nada. Con el contexto puesto sí se ve, y ahí
   `MAIL_SEND_ERROR` dice por qué no salió. Ojo también con el nombre de la
   columna: es `MAIL_SUBJ`, no `MAIL_SUBJECT`.
-- **`push_queue` entrega recién al commit.** Consultar la API de Mailpit
-  inmediatamente después del bloque PL/SQL da `total: 0` aunque todo esté bien.
-  Es una carrera del test, no una falla del SMTP: hay que commitear (o cerrar la
-  sesión) y recién ahí mirar.
+- **`push_queue` NO entrega: encola.** Esto estuvo mal documentado acá hasta el
+  25/09/2026, y manda al que verifica por el camino equivocado. Decía que
+  bastaba con commitear; no basta. Medido en APEX 26.1: con el `COMMIT` hecho y
+  la fila en `apex_mail_queue` **sin error**, Mailpit seguía en `total: 0`.
+
+  Quien entrega es un job del scheduler, `APEX_<ver>.ORACLE_APEX_MAIL_QUEUE`,
+  con `FREQ=MINUTELY;BYMINUTE=0,5,10,...;BYSECOND=0`: **cada 5 minutos en
+  punto**. Así que un `total: 0` a los pocos segundos de commitear no prueba
+  nada, ni en un sentido ni en el otro.
+
+  Para verificar sin esperar, dos caminos, los dos comprobados:
+
+  ```sql
+  -- a) forzar el job, EN ESTA sesión. Con use_current_session => FALSE vuelve
+  --    a ser asíncrono y no se ve nada.
+  BEGIN
+    DBMS_SCHEDULER.run_job('APEX_260100.ORACLE_APEX_MAIL_QUEUE',
+                           use_current_session => TRUE);
+  END;
+  /
+
+  -- b) saltear APEX y probar el SMTP a secas. Entrega al instante, y si esto
+  --    anda, lo que falla nunca es la red ni la ACL.
+  DECLARE
+    c UTL_SMTP.connection;
+  BEGIN
+    c := ... UTL_SMTP.open_connection('mail', 1025, c) ...
+  END;
+  /
+  ```
+
+  El corolario práctico: **si querés saber si el SMTP del entorno funciona, usá
+  (b)**. `apex_mail` mete en el medio una cola y un job, y los dos pueden hacer
+  parecer roto algo que anda.
 
 ## Corrida desde cero del 25/09/2026
 
@@ -177,6 +207,12 @@ que repita esto le van a pasar.
   `PLS-00302`. La API es `remove_host_ace`. El `revoke` nunca corrió y `app-acl`
   reportaba `[OK]` con razón; se descubrió recién al dejar de mandar la salida
   del bloque PL/SQL a `/dev/null`.
+
+Y **corrigió un error de este mismo documento**: la nota de `push_queue` decía
+que bastaba con commitear para que el correo saliera. No basta —entrega un job
+del scheduler, cada 5 minutos— y seguir esa nota lleva a concluir que el SMTP
+está roto cuando funciona. Está reescrita en
+[Dos trampas al verificar](#dos-trampas-al-verificar-no-del-entorno).
 
 ## Bugs que la corrida destapó
 
