@@ -124,8 +124,12 @@ el ACE existente en vez de duplicarlo: el script es idempotente y se puede
 correr a mano sin destruir el volumen.
 
 ```bash
-docker exec <contenedor-db> /container-entrypoint-initdb.d/02_acl_app.sh
+docker exec <contenedor-db> /container-entrypoint-startdb.d/02_acl_app.sh
 ```
+
+(`startdb.d`, no `initdb.d`: es donde `compose.yml` monta `./init`. La ruta
+vieja no existe dentro del contenedor y el `docker exec` falla con
+`no such file or directory`.)
 
 ### Si el endpoint es HTTPS
 

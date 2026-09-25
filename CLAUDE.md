@@ -26,6 +26,10 @@ docker compose up -d    # copia los datafiles al volumen (~4,5 GB), segundos
 docker compose down     # conserva los datos
 docker compose down -v  # destruye la base
 
+./doctor.sh             # 28 chequeos; read-only, imprime el comando y no lo corre
+./doctor.sh --static    # solo los que no necesitan Docker (los que corren en CI)
+./scripts/test-doctor.sh  # self-test del doctor contra fixtures rotas
+
 KEEP_ON_ERROR=1 ./build.sh    # no borra el contenedor de build si falla
 ALLOW_ENV_DRIFT=1 ./build.sh  # sigue aunque .env difiera de versions.env
 ```
@@ -33,8 +37,8 @@ ALLOW_ENV_DRIFT=1 ./build.sh  # sigue aunque .env difiera de versions.env
 Verificación estática, para cuando no tenés Docker a mano:
 
 ```bash
-bash -n build.sh scripts/*.sh
-shellcheck -x build.sh scripts/*.sh   # también corre en CI
+bash -n build.sh doctor.sh scripts/*.sh scripts/lib/*.sh
+shellcheck -x build.sh doctor.sh scripts/*.sh scripts/lib/*.sh   # también en CI
 ```
 
 Servicios: APEX Builder en `:8080/ords/apex` (workspace `INTERNAL`, usuario
@@ -47,8 +51,13 @@ build.sh                  entry point del build (queda en la raíz a propósito)
 compose.yml               stack: db + ords + mail
 versions.env              ÚNICA fuente de verdad de versiones y credenciales
 .env.example              plantilla; ./build.sh genera el .env real
+doctor.sh                 entry point del diagnóstico (también en la raíz)
 scripts/base-profile.sh   convenciones por imagen base (se sourcea, no se ejecuta)
 scripts/install-apex.sh   corre DENTRO del contenedor de build
+scripts/test-doctor.sh    self-test de doctor.sh con fixtures rotas
+scripts/lib/checks.sh     constantes + chequeos que build.sh Y doctor.sh usan
+scripts/lib/checks-env.sh chequeos estáticos del doctor
+scripts/lib/checks-runtime.sh  chequeos contra el stack levantado
 sql/                      post-configuración de APEX, se copia al contenedor
 init.example/             plantilla de semillas; build.sh siembra ./init (no versionado)
 apps.example/             donde van las apps exportadas; ./apps no se versiona
@@ -86,18 +95,30 @@ Si varía por proyecto, va solo en `.env.example`.
 **No dupliques un valor en dos archivos con un comentario "deben coincidir".**
 Ese patrón es exactamente lo que se sacó de este repo.
 
+Lo mismo vale para los chequeos: si `build.sh` y `doctor.sh` tienen que validar
+la misma cosa, la función va en `scripts/lib/checks.sh` y cada uno le aplica su
+política —`build.sh` aborta con `|| die`, `doctor.sh` reporta y sigue—. Un
+chequeo que solo usa el doctor va en `checks-env.sh` o `checks-runtime.sh`, y
+**recibe las rutas por parámetro**: es lo que permite que `test-doctor.sh` lo
+apunte a un directorio roto a propósito.
+
 ## Convenciones
 
 **Todo el SQL es 100 % ASCII**, sin tildes ni eñes ni siquiera en los
 comentarios. Corre dentro del contenedor con el `NLS_LANG` heredado del entorno.
 La regla vale para los `.sql` **y para el SQL embebido en los heredocs de
 `scripts/install-apex.sh`** — es fácil pasar por alto un literal acentuado ahí
-adentro. Chequeo:
+adentro. **No lo chequees a mano: es el chequeo `sql-ascii` de `./doctor.sh`**,
+que cubre los dos casos y corre en CI. A mano era un `grep` que nadie corría.
 
 ```bash
-LC_ALL=C grep -nP '[^\x09\x0A\x0D\x20-\x7E]' sql/*.sql
-awk '/<<SQL$/,/^SQL$/' scripts/install-apex.sh | LC_ALL=C grep -nP '[^\x09\x0A\x0D\x20-\x7E]'
+./doctor.sh --static     # incluye sql-ascii
 ```
+
+Ojo si alguna vez lo reescribís: el detector usa un rango de bytes literal
+(`LC_ALL=C grep -n '[^<tab> -~]'`) y **no** `[^[:print:]]`. GNU grep considera
+imprimibles los bytes >= 0x80 incluso en locale C, así que la versión con
+clases deja pasar las tildes sin decir nada. Verificado.
 
 Siempre `WHENEVER SQLERROR EXIT FAILURE` y `SET SERVEROUTPUT ON`: sin lo
 segundo, los `DBMS_OUTPUT` se descartan y un build mudo se lee igual que uno

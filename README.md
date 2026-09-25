@@ -19,6 +19,7 @@ git clone <tu-repo> apex-lab && cd apex-lab
 
 ./build.sh              # ~7 min en una máquina rápida, una sola vez por versión
 docker compose up -d    # copia los datafiles al volumen; suele tardar segundos
+./doctor.sh             # ¿está todo sano? 28 chequeos, ninguno destructivo
 ```
 
 No hace falta copiar el `.env`: `build.sh` lo genera desde `.env.example` con
@@ -35,12 +36,18 @@ que no haya divergido.
 
 ```
 build.sh                    entry point del build
+doctor.sh                   entry point del diagnóstico
 compose.yml                 stack: db + ords + mail
 versions.env                única fuente de verdad de versiones y credenciales
 .env.example                plantilla; build.sh genera el .env real
 scripts/
 ├── base-profile.sh         convenciones por imagen base (se sourcea)
-└── install-apex.sh         corre DENTRO del contenedor de build
+├── install-apex.sh         corre DENTRO del contenedor de build
+├── test-doctor.sh          self-test de doctor.sh contra fixtures rotas
+└── lib/                    chequeos compartidos por build.sh y doctor.sh
+    ├── checks.sh           constantes + lo que build.sh también usa
+    ├── checks-env.sh       chequeos estáticos
+    └── checks-runtime.sh   chequeos contra el stack levantado
 sql/
 ├── 10_apex_instance.sql    cuenta ADMIN, SMTP, parámetros de instancia
 └── 20_network_acl.sql      ACLs de red del engine de APEX
@@ -62,16 +69,36 @@ mkdir -p ~/proyectos/proyecto-x && cd ~/proyectos/proyecto-x
 
 # Se copia el .env ya generado, no el .example: trae los valores derivados
 # (imagen, ORDS_TAG, contraseña, perfil) resueltos por el build.
-cp ~/apex-lab/compose.yml ~/apex-lab/.env .
-cp -r ~/apex-lab/init.example init            # semillas de este proyecto
+# doctor.sh NO viaja solo: necesita su scripts/lib/.
+cp ~/apex-lab/compose.yml ~/apex-lab/.env ~/apex-lab/doctor.sh .
+mkdir -p scripts && cp -r ~/apex-lab/scripts/lib scripts/
+
+# Los estáticos de APEX. compose los monta desde ./cache/apex, ruta RELATIVA a
+# ESTE directorio: sin esto Docker crea el directorio vacío, lo monta igual y
+# el Builder carga en texto plano.
+ln -s ~/apex-lab/cache cache
+
+# Semillas de este proyecto. Se les quita el sufijo o el entrypoint las ignora
+# —solo ejecuta *.sh, *.sql, *.sql.zip y *.sql.gz— y el proyecto arrancaría sin
+# workspace, sin esquema y sin ACL, sin un solo mensaje de error.
+cp -r ~/apex-lab/init.example init
+for f in init/*.example; do mv "$f" "${f%.example}"; done
 
 sed -i 's/^COMPOSE_PROJECT_NAME=.*/COMPOSE_PROJECT_NAME=proyecto-x/' .env
 sed -i 's/^DB_PORT=.*/DB_PORT=1522/;s/^ORDS_PORT=.*/ORDS_PORT=8081/;s/^MAILPIT_PORT=.*/MAILPIT_PORT=8026/' .env
+
+./doctor.sh --static    # confirma que no falta nada ANTES de levantar
 docker compose up -d
+./doctor.sh             # y que todo quedó sano después
 ```
 
 Cambiar los puertos permite tener varios proyectos corriendo en paralelo.
 Para destruir el entorno completo: `docker compose down -v`.
+
+Los dos pasos que parecen de más —el `ln -s` del cache y el renombrado de las
+semillas— no lo son: sin ellos el proyecto arranca **y parece andar**, pero el
+Builder sale sin estilos y la base sin workspace. Ninguno de los dos produce un
+error. Por eso `./doctor.sh --static` va antes del primer `up`.
 
 ### Semillas del proyecto
 
@@ -123,6 +150,46 @@ Ojo con un detalle que no se adivina: **SQLcl está en el contenedor de ORDS, no
 en el de la base.** Y ahí la base se llama `db`, no `localhost`.
 
 → [`apps.example/README.md`](apps.example/README.md)
+
+---
+
+## Diagnóstico: `./doctor.sh`
+
+Todo lo que este README documenta como "problema frecuente" está también
+ejecutable. `./doctor.sh` corre 28 chequeos y explica cada hallazgo:
+
+```bash
+./doctor.sh              # completo (necesita el stack levantado para 12 de ellos)
+./doctor.sh --static     # solo lo que no necesita Docker; es lo que corre en CI
+./doctor.sh --help       # incluye qué queda deliberadamente fuera y por qué
+```
+
+```
+  [FAIL] init-exec-bit          Semillas sin bit de ejecucion: 01_workspace.sh.
+         El entrypoint las SOURCEA en vez de ejecutarlas, y esa rama tiene un
+         bug de upstream que les pasa el echo siguiente como argumento: el
+         fallo es real pero ilegible.
+         -> chmod +x init/*.sh
+
+  16 OK   1 WARN   1 FAIL   0 SKIP
+```
+
+**No repara nada.** Imprime el comando y lo corrés vos: varias reparaciones acá
+son destructivas —un `down -v` borra la base— y esa no es una decisión que deba
+tomar una herramienta de diagnóstico.
+
+Sale con **0** si está todo bien, **2** si hay avisos y **1** si hay algo roto.
+
+Corre igual en este repo y en un directorio de proyecto. Allá no existen
+`versions.env` ni `sql/`, así que los seis chequeos que dependen de eso se
+reportan como `[SKIP]` **con el motivo, nunca como `[OK]`**: un chequeo que no
+se pudo hacer no es un chequeo que pasó. Por la misma razón, un clon recién
+hecho —sin `.env`, sin `init/`, sin `cache/`— sale 0 y no una pared de rojo.
+
+Que los chequeos de verdad detecten lo que dicen lo verifica
+`./scripts/test-doctor.sh`, que arma directorios rotos a propósito y comprueba
+cada código de salida. Un chequeo que devuelve `[OK]` porque su `grep` está mal
+escrito es peor que no tenerlo.
 
 ---
 
@@ -282,16 +349,22 @@ FUTC en el repo.
 
 ## Problemas frecuentes
 
-| Síntoma | Causa probable |
-|---|---|
-| `ORA-00845` o la base no arranca | Falta `shm_size: 2gb` / `--shm-size=2g` |
-| APEX carga sin estilos, todo texto plano | El montaje de `./cache/apex` en ORDS no está o quedó vacío |
-| `ORA-29273` (con `ORA-24247` adentro) desde tu propio PL/SQL | El build otorga ACLs a APEX, no al esquema de tu app. Receta en `init.example/README.md` |
-| `ORA-24247` desde una REST Data Source de APEX | Faltan las ACLs del engine (`sql/20_network_acl.sql`) |
-| `ORA-29024` / `ORA-28860` con un endpoint HTTPS | La ACL está, falta la cadena de certificados en el wallet |
-| `ORA-28002` meses después | Contraseña expirada; el build lo previene con `PASSWORD_LIFE_TIME UNLIMITED` |
-| El build falla al descargar APEX | Oracle cambió la URL o re-publicó el zip; verificar `APEX_URL` y el SHA256 |
-| `docker compose up` tarda en el primer arranque | Se copian los datafiles (~4,5 GB) al volumen. Solo ocurre una vez por proyecto |
+La última columna es el chequeo de `./doctor.sh` que lo detecta. Mantenerla es
+lo que hace visible la deriva entre esta tabla y la herramienta: una fila sin
+chequeo es una oportunidad, y un chequeo sin fila es documentación que falta.
+
+| Síntoma | Causa probable | Lo detecta |
+|---|---|---|
+| `ORA-00845` o la base no arranca | Falta `shm_size: 2gb` / `--shm-size=2g` | `compose-shm`, `db-shm-runtime` |
+| APEX carga sin estilos, todo texto plano | El montaje de `./cache/apex` en ORDS no está o quedó vacío | `ords-static-mount`, `ords-statics-http` |
+| `ORA-29273` (con `ORA-24247` adentro) desde tu propio PL/SQL | El build otorga ACLs a APEX, no al esquema de tu app. Receta en `init.example/README.md` | `app-acl` |
+| `ORA-24247` desde una REST Data Source de APEX | Faltan las ACLs del engine (`sql/20_network_acl.sql`) | `engine-acl` |
+| `ORA-29024` / `ORA-28860` con un endpoint HTTPS | La ACL está, falta la cadena de certificados en el wallet | — (depende del endpoint) |
+| `ORA-28002` meses después | Contraseña expirada; el build lo previene con `PASSWORD_LIFE_TIME UNLIMITED` | `account-expiry` |
+| El build falla al descargar APEX | Oracle cambió la URL o re-publicó el zip; verificar `APEX_URL` y el SHA256 | `apex-sha` |
+| Las semillas de `init/` no tuvieron efecto | Quedaron con el sufijo `.example`, o sin `+x`, o montadas en `initdb.d` | `init-inert-example`, `init-exec-bit`, `seed-dir-mount`, `init-ran` |
+| La base abre pero le falta el `datapatch` | Subiste la versión conservando el volumen: datafiles viejos bajo binarios nuevos | `datapatch-pending` |
+| `docker compose up` tarda en el primer arranque | Se copian los datafiles (~4,5 GB) al volumen. Solo ocurre una vez por proyecto | — (es normal) |
 
 ---
 
