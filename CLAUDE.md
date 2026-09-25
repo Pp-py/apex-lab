@@ -26,7 +26,7 @@ docker compose up -d    # copia los datafiles al volumen (~4,5 GB), segundos
 docker compose down     # conserva los datos
 docker compose down -v  # destruye la base
 
-./doctor.sh             # 28 chequeos; read-only, imprime el comando y no lo corre
+./doctor.sh             # 29 chequeos; read-only, imprime el comando y no lo corre
 ./doctor.sh --static    # solo los que no necesitan Docker (los que corren en CI)
 ./scripts/test-doctor.sh  # self-test del doctor contra fixtures rotas
 
@@ -189,6 +189,20 @@ adentro.
   ejecuta los que tienen `+x` y *sourcea* los que no, y su rama de sourcing
   tiene un bug de upstream (le falta un `;`, así que le pasa el `echo` siguiente
   como argumento al script).
+- **`core.fileMode=false` en este repo: el `chmod +x` NO llega al índice.** Git
+  ignora el bit del filesystem, así que un `.sh` nuevo se commitea a 644 aunque
+  en tu disco sea 755. En tu máquina anda y en el clon no, que es la peor
+  combinación para diagnosticar. Pasó dos veces: las tres plantillas de
+  `init.example/` estuvieron a 644 desde el primer commit —contradiciendo a su
+  propio README— y `doctor.sh` se publicó sin el bit y rompió CI con
+  `Permission denied`. Al agregar un `.sh` ejecutable:
+
+  ```bash
+  git update-index --chmod=+x <archivo>
+  ```
+
+  Lo vigila el chequeo `git-exec-bit`, que compara el índice contra el disco.
+
 - **`init/` está en `.gitignore` a propósito**: ahí va el DDL y los datos de cada
   proyecto, que no deben subir a este repo. Lo versionado es `init.example/`, y
   `build.sh` siembra `init/` desde ahí si falta. No agregues `init/` al índice

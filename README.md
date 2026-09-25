@@ -19,7 +19,7 @@ git clone <tu-repo> apex-lab && cd apex-lab
 
 ./build.sh              # ~7 min en una máquina rápida, una sola vez por versión
 docker compose up -d    # copia los datafiles al volumen; suele tardar segundos
-./doctor.sh             # ¿está todo sano? 28 chequeos, ninguno destructivo
+./doctor.sh             # ¿está todo sano? 29 chequeos, ninguno destructivo
 ```
 
 No hace falta copiar el `.env`: `build.sh` lo genera desde `.env.example` con
@@ -156,7 +156,7 @@ en el de la base.** Y ahí la base se llama `db`, no `localhost`.
 ## Diagnóstico: `./doctor.sh`
 
 Todo lo que este README documenta como "problema frecuente" está también
-ejecutable. `./doctor.sh` corre 28 chequeos y explica cada hallazgo:
+ejecutable. `./doctor.sh` corre 29 chequeos y explica cada hallazgo:
 
 ```bash
 ./doctor.sh              # completo (necesita el stack levantado para 12 de ellos)
@@ -364,6 +364,7 @@ chequeo es una oportunidad, y un chequeo sin fila es documentación que falta.
 | El build falla al descargar APEX | Oracle cambió la URL o re-publicó el zip; verificar `APEX_URL` y el SHA256 | `apex-sha` |
 | Las semillas de `init/` no tuvieron efecto | Quedaron con el sufijo `.example`, o sin `+x`, o montadas en `initdb.d` | `init-inert-example`, `init-exec-bit`, `seed-dir-mount`, `init-ran` |
 | La base abre pero le falta el `datapatch` | Subiste la versión conservando el volumen: datafiles viejos bajo binarios nuevos | `datapatch-pending` |
+| Un `.sh` del repo llega sin permiso de ejecución al clonar | `core.fileMode=false`: el `chmod +x` local nunca llegó al índice de git | `git-exec-bit` |
 | `docker compose up` tarda en el primer arranque | Se copian los datafiles (~4,5 GB) al volumen. Solo ocurre una vez por proyecto | — (es normal) |
 
 ---

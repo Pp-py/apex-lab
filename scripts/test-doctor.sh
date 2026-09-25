@@ -138,6 +138,23 @@ mkdir -p "${TMP}/ej_nox" && : > "${TMP}/ej_nox/01.sh.example" && chmod -x "${TMP
 esperado 0 init-example "acepta plantillas con +x"  -- check_init_example_integrity "${TMP}/ej_ok"
 esperado 1 init-example "detecta plantilla sin +x"  -- check_init_example_integrity "${TMP}/ej_nox"
 
+# --- git-exec-bit --------------------------------------------------------
+# Se reproduce el escenario exacto que rompio el CI de este repo: core.fileMode
+# en false, un chmod +x posterior al `git add`, y el indice quedandose en 644.
+GR="${TMP}/gitrepo"
+mkdir -p "${GR}" && git init -q "${GR}" && git -C "${GR}" config core.fileMode false
+printf '#!/bin/sh\n' > "${GR}/run.sh"
+git -C "${GR}" add run.sh              # entra a 100644: todavia no es ejecutable
+chmod +x "${GR}/run.sh"                # el disco cambia, el indice no se entera
+esperado 1 git-exec-bit "detecta +x en disco y 644 en el indice" -- check_git_exec_bit "${GR}"
+
+git -C "${GR}" update-index --chmod=+x run.sh
+esperado 0 git-exec-bit "acepta cuando el indice coincide"       -- check_git_exec_bit "${GR}"
+
+chmod -x "${GR}/run.sh"                # ahora al reves: 755 en el indice, 644 en disco
+esperado 2 git-exec-bit "avisa del caso inverso"                 -- check_git_exec_bit "${GR}"
+esperado 3 git-exec-bit "fuera de un repo git es SKIP"           -- check_git_exec_bit "${TMP}/init_ok"
+
 # --- env-drift y build-password -----------------------------------------
 esperado 1 env-drift "detecta una clave derivada divergente" \
   -- check_env_drift "$(env_con "APEX_DB_IMAGE=${IMAGE_NAME}:${IMAGE_TAG}" 'ORDS_TAG=99.9.9')"
