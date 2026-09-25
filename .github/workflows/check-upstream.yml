@@ -53,7 +53,13 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      issues: write     # abre o comenta el issue de actualizaciones
+      issues: write     # abre, comenta o cierra el issue de actualizaciones
+    env:
+      # El prefijo del título es lo que enlaza las tres operaciones sobre el
+      # issue: crearlo, comentarlo y cerrarlo. Va definido una sola vez. Escrito
+      # suelto en cada paso, el día que alguien lo cambie en uno el workflow
+      # deja de encontrar su propio issue y abre uno nuevo cada mes, en silencio.
+      ISSUE_PREFIX: "Actualizaciones upstream disponibles"
     steps:
       - uses: actions/checkout@v5
 
@@ -149,11 +155,11 @@ jobs:
           set -Eeuo pipefail
 
           existing=$(gh issue list --state open --limit 100 --json number,title \
-            --jq '[.[] | select(.title | startswith("Actualizaciones upstream disponibles"))][0].number // empty')
+            --jq '[.[] | select(.title | startswith($ENV.ISSUE_PREFIX))][0].number // empty')
 
           if [[ -z "${existing}" ]]; then
             gh issue create \
-              --title "Actualizaciones upstream disponibles ($(date +%Y-%m))" \
+              --title "${ISSUE_PREFIX} ($(date +%Y-%m))" \
               --body "$(printf 'Detectado por el workflow mensual:\n\n%s\n\nPasos: actualizar `versions.env`, vaciar `APEX_SHA256`, correr `./build.sh` y fijar el hash nuevo.\n\nAntes de subir de versión de APEX, revisar los requisitos de ORDS y de BD en las release notes.' "$BODY")"
             exit 0
           fi
@@ -169,3 +175,28 @@ jobs:
 
           gh issue comment "${existing}" \
             --body "$(printf 'Corrida del %s, cambió lo detectado:\n\n%s' "$(date -u +%F)" "$BODY")"
+
+      # Contrapeso del paso anterior: sin esto un issue sobrevive a su propia
+      # causa. Ese paso solo corre cuando HAY hallazgos, así que nadie avisaba
+      # cuando dejaba de haberlos y el issue quedaba abierto para siempre, aunque
+      # versions.env ya estuviera al día. Pasó con el #1: se abrió por la base
+      # 23.26.2 y por un falso positivo de APEX del check viejo, los dos
+      # quedaron resueltos a los dos días y el issue siguió abierto igual.
+      #
+      # Cerrarlo es además la única señal de "al día" que emite este workflow:
+      # sin hallazgos y sin issue abierto, una corrida exitosa no deja rastro
+      # visible fuera del log de Actions.
+      - name: Cerrar el issue si ya no hay hallazgos
+        if: steps.check.outputs.changed == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+
+          existing=$(gh issue list --state open --limit 100 --json number,title \
+            --jq '[.[] | select(.title | startswith($ENV.ISSUE_PREFIX))][0].number // empty')
+
+          [[ -n "${existing}" ]] || { echo "Todo al día y no hay issue abierto."; exit 0; }
+
+          gh issue close "${existing}" --reason completed --comment \
+            "Corrida del $(date -u +%F): las versiones fijadas en \`versions.env\` vuelven a coincidir con upstream. Se cierra automáticamente."
