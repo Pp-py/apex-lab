@@ -19,6 +19,7 @@ readonly APEXLAB_CHECKS_RUNTIME_SH=1
 
 RT_PROJECT=""
 RT_DB=""
+RT_ORDS=""
 RT_ORDS_URL=""
 RT_MAILPIT_URL=""
 RT_APP_SCHEMA=""
@@ -75,6 +76,10 @@ runtime_resolve() {
   RT_PROJECT="$(env_value COMPOSE_PROJECT_NAME "${ENV_FILE}")"
   RT_PROJECT="${RT_PROJECT:-apexlab}"
   RT_DB="${RT_PROJECT}-db"
+  # El contenedor de ORDS, no solo su URL: ahi vive el SQLcl que usan
+  # `apex export` (README) y scripts/apex-roundtrip.sh. El doctor no lo
+  # necesita, pero derivarlo dos veces seria la duplicacion de siempre.
+  RT_ORDS="${RT_PROJECT}-ords"
   RT_APP_SCHEMA="$(env_value APP_SCHEMA "${ENV_FILE}")"
   RT_PDB="${DB_PDB:-FREEPDB1}"
 
