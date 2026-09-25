@@ -242,8 +242,10 @@ El stack tiene que estar **levantado** (`db` y `ords`; Mailpit no hace falta).
 El script no lo levanta ni lo baja, no borra apps y no toca el `.env`. Lo único
 que escribe es la app destino y su directorio de evidencia.
 
-Por defecto importa en el **ID 9000** con el alias `APEXLAB-ROUNDTRIP`. Si ese
-ID ya lo ocupa otra app, **aborta**: `apex import` sobrescribe sin preguntar y
+Por defecto importa en el **ID 9000**, con el alias `APEXLAB-RT-9000` — el ID
+va dentro del alias porque APEX exige alias único por workspace y **renombra
+solo, sin avisar**, el que ya esté tomado. Si el ID destino lo ocupa una app
+que no creó este script, **aborta**: `apex import` sobrescribe sin preguntar y
 no hay deshacer. Para forzarlo, `--force`; para usar otro ID, `--id`.
 
 ### Evidencia
