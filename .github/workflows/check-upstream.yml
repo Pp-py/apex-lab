@@ -21,12 +21,18 @@ on:
       - ".env.example"
       - "sql/**"
       - ".github/workflows/check-upstream.yml"
+  # Los PR corren SIEMPRE, sin filtro de paths, y no es un descuido.
+  #
+  # `main` exige lint, doctor y roundtrip para poder mergear. Cuando un
+  # workflow se saltea por filtro de paths, GitHub deja sus checks en
+  # "Pending" para siempre —no los da por exitosos—, asi que un PR que solo
+  # toque documentacion quedaba BLOQUEADO sin ninguna forma de destrabarlo.
+  # Paso con el primer PR de docs que entro despues de activar la proteccion.
+  #
+  # El costo de correrlos igual es un minuto: el unico pesado es roundtrip, que
+  # baja la imagen de ORDS. El costo de la alternativa era un PR imposible de
+  # mergear.
   pull_request:
-    paths:
-      - "**.sh"
-      - "compose.yml"
-      - ".env.example"
-      - "sql/**"
 
 # Los permisos van por job, no acá: el lint solo lee el repo y no tiene por qué
 # heredar el `issues: write` que necesita el otro job.
