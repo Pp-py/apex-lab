@@ -20,6 +20,10 @@ readonly REPO
 source "${REPO}/scripts/lib/checks.sh"
 # shellcheck source=scripts/lib/checks-env.sh
 source "${REPO}/scripts/lib/checks-env.sh"
+# ports-free vive en la lib de runtime (mira sockets y Docker), pero su
+# decision se prueba igual que el resto: con sondas falsas.
+# shellcheck source=scripts/lib/checks-runtime.sh
+source "${REPO}/scripts/lib/checks-runtime.sh"
 # Las constantes derivadas que check_env_drift necesita.
 # shellcheck source=versions.env
 source "${REPO}/versions.env"
@@ -69,6 +73,35 @@ mkdir -p "${TMP}/init_doc" && : > "${TMP}/init_doc/01.sh" && : > "${TMP}/init_do
 esperado 1 init-inert-example "detecta el .sh.example colgado" -- check_init_inert "${TMP}/init_ej"
 esperado 2 init-inert-example "avisa de otras extensiones"     -- check_init_inert "${TMP}/init_otro"
 esperado 0 init-inert-example "el README.md no molesta"        -- check_init_inert "${TMP}/init_doc"
+
+# --- ports-free ----------------------------------------------------------
+#
+# Las sondas reales abren sockets y consultan Docker; acá se reemplazan por
+# falsas para poder ejercitar la decision en los cuatro casos. El bug que
+# motivo este chequeo fue un `up` que murio con "port is already allocated"
+# sin decir que puerto cambiar.
+libre()     { return 1; }          # nada escucha
+ocupado()   { return 0; }          # todo escucha
+nuestro()   { return 0; }          # ...y es de este proyecto
+ajeno()     { return 1; }          # ...y es de otro
+PORTS_ENV="$(env_con 'DB_PORT=1521' 'ORDS_PORT=8080' 'MAILPIT_PORT=8025' 'COMPOSE_PROJECT_NAME=apexlab')"
+
+PORT_PROBE=libre PORT_OWNER_IS_US=ajeno \
+  esperado 0 ports-free "puertos libres"                     -- check_ports_free "${PORTS_ENV}"
+PORT_PROBE=ocupado PORT_OWNER_IS_US=ajeno \
+  esperado 1 ports-free "ocupados por otro: FAIL"            -- check_ports_free "${PORTS_ENV}"
+PORT_PROBE=ocupado PORT_OWNER_IS_US=nuestro \
+  esperado 0 ports-free "ocupados por nosotros: el stack ya esta arriba" -- check_ports_free "${PORTS_ENV}"
+esperado 3 ports-free "sin .env es SKIP, no FAIL"            -- check_ports_free "${TMP}/no_existe"
+
+PORT_PROBE=ocupado PORT_OWNER_IS_US=ajeno check_ports_free "${PORTS_ENV}" || true
+for aguja in 1521 8080 8025 'already allocated' 'DB_PORT='; do
+  if [[ "${CHECK_DETAIL}${CHECK_FIX}" == *"${aguja}"* ]]; then
+    N_PASS=$((N_PASS+1)); printf '  %sok%s    %-24s %s\n' "${C_G}" "${C_0}" "ports-free" "el mensaje nombra ${aguja}"
+  else
+    N_FAIL=$((N_FAIL+1)); printf '  %sFALLO%s %-24s %s\n' "${C_R}" "${C_0}" "ports-free" "el mensaje NO nombra ${aguja}"
+  fi
+done
 
 # --- bind-addr -----------------------------------------------------------
 esperado 2 bind-addr "detecta 0.0.0.0"          -- check_bind_addr "$(env_con 'BIND_ADDR=0.0.0.0')"

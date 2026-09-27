@@ -67,6 +67,23 @@ _sql1() {
     | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
 }
 
+# ¿Este servicio de ESTE proyecto esta corriendo?
+#
+# Existe por un falso positivo real: con `apexlab-ords` sin arrancar, los
+# chequeos HTTP interrogaron el 127.0.0.1:8080 de OTRO stack que ya tenia el
+# puerto tomado, recibieron un 302 y reportaron [OK]. El doctor diagnostico el
+# stack de otra persona y dijo que el Builder respondia cuando no existia.
+#
+# Un puerto que contesta no prueba que conteste lo TUYO. Antes de mirar HTTP
+# hay que confirmar de quien es el puerto, y eso solo lo sabe compose.
+#
+# Cachea porque tres chequeos lo consultan y `docker compose ps` no es gratis.
+RT_PS_CACHE=""
+_rt_service_running() {
+  [[ -n "${RT_PS_CACHE}" ]] || RT_PS_CACHE="$(_compose ps --format '{{.Service}} {{.State}}' || true)$(printf '\n.')"
+  [[ "$(awk -v s="$1" '$1==s {print $2}' <<< "${RT_PS_CACHE}")" == "running" ]]
+}
+
 _http_code() { curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$1" 2>/dev/null || true; }
 
 # ---------------------------------------------------------------------------
@@ -96,6 +113,90 @@ runtime_resolve() {
 # ---------------------------------------------------------------------------
 # Chequeos
 # ---------------------------------------------------------------------------
+
+# ports-free vive acá y no en checks-env.sh aunque corra ANTES del `up`:
+# mira sockets en LISTEN y le pregunta a Docker de quién es cada puerto, así
+# que no es estático por la definición de este repo —lo estático es lo que no
+# necesita Docker y puede correr en CI—. El grupo de runtime igual se ejecuta
+# con el stack abajo: cada chequeo degrada a [SKIP] por su cuenta.
+# ¿Hay algo escuchando en host:puerto?
+#
+# `ss` cuando esta (mira sockets en LISTEN, sin conectarse); si no, un connect
+# con /dev/tcp, que bash siempre trae.
+_puerto_ocupado() {
+  local host="$1" port="$2"
+  if command -v ss >/dev/null 2>&1; then
+    ss -lntH "sport = :${port}" 2>/dev/null | grep -q .
+  else
+    (exec 3<>"/dev/tcp/${host}/${port}") 2>/dev/null && exec 3<&- 3>&-
+  fi
+}
+
+# ¿Ese puerto lo publica un contenedor de ESTE proyecto?
+#
+# Si la respuesta es si, que este ocupado es lo normal: el stack ya esta
+# arriba. Lo que hay que detectar es el puerto tomado por OTRA cosa.
+_puerto_es_nuestro() {
+  local port="$1" proyecto="$2"
+  command -v docker >/dev/null 2>&1 || return 1
+  docker ps --filter "label=com.docker.compose.project=${proyecto}" \
+            --format '{{.Ports}}' 2>/dev/null | grep -qE "(^|,| )[0-9.]+:${port}->"
+}
+
+# Quien tiene el puerto, si Docker lo sabe. Vacio si no.
+_quien_tiene_el_puerto() {
+  local port="$1"
+  command -v docker >/dev/null 2>&1 || return 0
+  docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null \
+    | awk -F'\t' -v p="${port}" '$2 ~ ("(^|, )[0-9.:]*:" p "->") {print $1; exit}'
+}
+
+# Los puertos que compose va a pedir, ANTES de que `up` falle.
+#
+# Sin esto, el primer `docker compose up -d` de quien ya tenga algo en 1521
+# —otra base, el stack de un compañero— muere con un
+# "Bind for 0.0.0.0:1521 failed: port is already allocated" que no dice ni que
+# puerto cambiar ni donde. Paso de verdad: el README manda `clone` + `build.sh`
+# + `up` sin mencionar los puertos, porque personalizarlos esta documentado
+# recien en "Un proyecto nuevo".
+# Las dos sondas van por variable y no por llamada directa: test-doctor.sh las
+# reemplaza por funciones falsas y asi ejercita la decision —que puerto se
+# marca, con que mensaje, y la excepcion de "ya es nuestro"— sin depender de
+# abrir sockets reales ni de que haya un contenedor levantado. Misma idea que
+# pasarle las rutas por parametro al resto de los chequeos.
+: "${PORT_PROBE:=_puerto_ocupado}"
+: "${PORT_OWNER_IS_US:=_puerto_es_nuestro}"
+
+check_ports_free() {
+  local archivo_env="$1"
+  [[ -f "${archivo_env}" ]] || _skip "no existe .env; lo genera ./build.sh" || return 3
+
+  local bind proyecto
+  bind="$(env_value BIND_ADDR "${archivo_env}")";            bind="${bind:-127.0.0.1}"
+  proyecto="$(env_value COMPOSE_PROJECT_NAME "${archivo_env}")"; proyecto="${proyecto:-apexlab}"
+  [[ "${bind}" == "0.0.0.0" ]] && bind="127.0.0.1"
+
+  local ocupados=() clave port defecto duenio
+  for clave in DB_PORT:1521 ORDS_PORT:8080 MAILPIT_PORT:8025; do
+    defecto="${clave#*:}"
+    port="$(env_value "${clave%%:*}" "${archivo_env}")"; port="${port:-${defecto}}"
+    "${PORT_PROBE}" "${bind}" "${port}" || continue
+    "${PORT_OWNER_IS_US}" "${port}" "${proyecto}" && continue
+    duenio="$(_quien_tiene_el_puerto "${port}")"
+    ocupados+=("${clave%%:*}=${port}${duenio:+ (lo tiene ${duenio})}")
+  done
+
+  if [[ ${#ocupados[@]} -gt 0 ]]; then
+    _fail "Estos puertos ya estan tomados por algo que no es este proyecto:
+$(printf '       %s\n' "${ocupados[@]}")
+   \`docker compose up\` va a fallar con 'port is already allocated'. Los
+   puertos son por-proyecto: cambialos en el .env, no hace falta rehornear." \
+      "sed -i 's/^DB_PORT=.*/DB_PORT=1522/;s/^ORDS_PORT=.*/ORDS_PORT=8081/;s/^MAILPIT_PORT=.*/MAILPIT_PORT=8026/' ${archivo_env}"
+    return 1
+  fi
+  _ok "los tres puertos estan libres o ya son de este proyecto"
+}
+
 check_containers_health() {
   local ps_out
   ps_out="$(_compose ps --format '{{.Service}} {{.State}} {{.Health}}' || true)"
@@ -264,6 +365,9 @@ check_app_acl() {
 }
 
 check_builder_http() {
+  _rt_service_running ords || {
+    _skip "ords no esta corriendo en este proyecto; no se mira el puerto porque
+   podria contestar otro stack"; return 3; }
   local code; code="$(_http_code "${RT_ORDS_URL}/ords/apex")"
   case "${code}" in
     000) _skip "ORDS no responde en ${RT_ORDS_URL} (stack apagado o aun arrancando)"; return 3 ;;
@@ -276,6 +380,9 @@ check_builder_http() {
 # El sintoma clasico es "APEX carga sin estilos, todo texto plano": ORDS sirve
 # el HTML pero no los estaticos, porque el montaje de ./cache/apex esta vacio.
 check_ords_statics_http() {
+  _rt_service_running ords || {
+    _skip "ords no esta corriendo en este proyecto; no se mira el puerto porque
+   podria contestar otro stack"; return 3; }
   local url="${RT_ORDS_URL}/i/apex_ui/css/Core.min.css" out code ctype
   out="$(curl -s -o /dev/null -w '%{http_code} %{content_type}' --max-time 10 "${url}" 2>/dev/null || true)"
   code="${out%% *}"; ctype="${out#* }"
@@ -299,6 +406,9 @@ check_ords_statics_http() {
 }
 
 check_mailpit_http() {
+  _rt_service_running mail || {
+    _skip "mail no esta corriendo en este proyecto; no se mira el puerto porque
+   podria contestar otro stack"; return 3; }
   local code; code="$(_http_code "${RT_MAILPIT_URL}")"
   case "${code}" in
     000) _skip "Mailpit no responde en ${RT_MAILPIT_URL} (stack apagado)"; return 3 ;;
@@ -408,6 +518,7 @@ runtime_checks() {
     run_check docker-daemon check_docker_daemon
     return 0
   fi
+  run_check ports-free         check_ports_free "${ENV_FILE}"
   run_check containers-health  check_containers_health
   run_check db-shm-runtime     check_db_shm_runtime
   run_check apex-registry      check_apex_registry

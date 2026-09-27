@@ -18,13 +18,35 @@ cada vez que sale una versión nueva; después, cada proyecto arranca en segundo
 git clone <tu-repo> apex-lab && cd apex-lab
 
 ./build.sh              # ~7 min en una máquina rápida, una sola vez por versión
+./doctor.sh             # 30 chequeos; con el stack abajo avisa si falta algo
 docker compose up -d    # copia los datafiles al volumen; suele tardar segundos
-./doctor.sh             # ¿está todo sano? 29 chequeos, ninguno destructivo
+./doctor.sh             # y que todo quedó sano después
 ```
 
 No hace falta copiar el `.env`: `build.sh` lo genera desde `.env.example` con
 los valores de `versions.env` ya resueltos, y en cada corrida posterior verifica
 que no haya divergido.
+
+**El `doctor.sh` antes del `up` no es ceremonia.** Los puertos por defecto son
+1521, 8080 y 8025, y si ya tenés algo ahí —otra base, el stack de un
+compañero— `docker compose up` muere con un
+`Bind for 0.0.0.0:1521 failed: port is already allocated` que no dice qué
+puerto cambiar. El chequeo `ports-free` te lo dice antes, con nombre y
+apellido de quién lo tiene.
+
+### Si necesitás otros puertos
+
+Se cambian en el `.env`, **sin rehornear la imagen**: son por-proyecto y
+`build.sh` no los toca.
+
+```bash
+sed -i 's/^DB_PORT=.*/DB_PORT=1522/;s/^ORDS_PORT=.*/ORDS_PORT=8081/;s/^MAILPIT_PORT=.*/MAILPIT_PORT=8026/' .env
+docker compose up -d
+```
+
+Es además lo que te permite tener **varios proyectos en paralelo** sobre la
+misma imagen: cada uno con sus puertos y su `COMPOSE_PROJECT_NAME`. Ver
+[Un proyecto nuevo](#un-proyecto-nuevo).
 
 - **APEX Builder** → http://localhost:8080/ords/apex — workspace `INTERNAL`, usuario `ADMIN`
 - **Mailpit** (todo el correo saliente cae acá) → http://localhost:8025
@@ -163,10 +185,10 @@ Que lo exportado **vuelva a entrar** lo comprueba
 ## Diagnóstico: `./doctor.sh`
 
 Todo lo que este README documenta como "problema frecuente" está también
-ejecutable. `./doctor.sh` corre 29 chequeos y explica cada hallazgo:
+ejecutable. `./doctor.sh` corre 30 chequeos y explica cada hallazgo:
 
 ```bash
-./doctor.sh              # completo (necesita el stack levantado para 12 de ellos)
+./doctor.sh              # completo; 13 hablan con Docker
 ./doctor.sh --static     # solo lo que no necesita Docker; es lo que corre en CI
 ./doctor.sh --help       # incluye qué queda deliberadamente fuera y por qué
 ```
@@ -455,6 +477,7 @@ catálogo completo lo imprime `./doctor.sh`.
 | Síntoma | Causa probable | Lo detecta |
 |---|---|---|
 | `ORA-00845` o la base no arranca | Falta `shm_size: 2gb` / `--shm-size=2g` | `compose-shm`, `db-shm-runtime` |
+| `docker compose up` falla con `port is already allocated` | Otro stack ya tiene 1521, 8080 u 8025. Se cambian en el `.env`, sin rebuild | `ports-free` |
 | APEX carga sin estilos, todo texto plano | El montaje de `./cache/apex` en ORDS no está o quedó vacío | `ords-static-mount`, `ords-statics-http` |
 | `ORA-29273` (con `ORA-24247` adentro) desde tu propio PL/SQL | El build otorga ACLs a APEX, no al esquema de tu app. Receta en `init.example/README.md` | `app-acl` |
 | `ORA-24247` desde una REST Data Source de APEX | Faltan las ACLs del engine (`sql/20_network_acl.sql`) | `engine-acl` |

@@ -26,7 +26,7 @@ docker compose up -d    # copia los datafiles al volumen (~4,5 GB), segundos
 docker compose down     # conserva los datos
 docker compose down -v  # destruye la base
 
-./doctor.sh             # 29 chequeos; read-only, imprime el comando y no lo corre
+./doctor.sh             # 30 chequeos; read-only, imprime el comando y no lo corre
 ./doctor.sh --static    # solo los que no necesitan Docker (los que corren en CI)
 ./scripts/test-doctor.sh  # self-test del doctor contra fixtures rotas
 
@@ -223,6 +223,19 @@ adentro.
   éxito literal, y nada más— y no un grep de errores conocidos: una denylist da
   PASS con cualquier fallo que todavía no esté en la lista, empezando por un
   comando mal escrito por nosotros. Es la misma disciplina de `_sql1()`.
+
+- **Un puerto que contesta no prueba que conteste lo TUYO.** Los chequeos HTTP
+  del doctor sondeaban `127.0.0.1:<puerto>` sin confirmar de quién era el
+  puerto. Con el ORDS del proyecto sin arrancar y otro stack ocupando el 8080,
+  `builder-http` y `ords-statics-http` recibieron un 302 ajeno y reportaron
+  `[OK]`: el doctor diagnosticó el stack de otra persona, y lo hizo en la misma
+  corrida en que `containers-health` decía que ORDS no existía. Ahora los tres
+  chequeos HTTP confirman primero con `docker compose ps` que el servicio corre
+  **en este proyecto**, y si no, `[SKIP]` con el motivo.
+
+  El corolario vale para cualquier chequeo nuevo que mire un puerto, un archivo
+  compartido o un contenedor por nombre: **identificá el dueño antes de creerle
+  a la respuesta.**
 
 - **APEX renombra el alias de una app importada si ya está tomado, y no
   avisa.** El alias es único por workspace: importar con uno en uso deja la app
