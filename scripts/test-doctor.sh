@@ -85,6 +85,23 @@ esperado 1 init-inert-example "detecta el .sh.example colgado" -- check_init_ine
 esperado 2 init-inert-example "avisa de otras extensiones"     -- check_init_inert "${TMP}/init_otro"
 esperado 0 init-inert-example "el README.md no molesta"        -- check_init_inert "${TMP}/init_doc"
 
+# --- prereqs: Compose v2 -------------------------------------------------
+#
+# Tener `docker` no implica tener el plugin de Compose v2, y todo el repo usa
+# `docker compose`. Sin este caso, el chequeo pasaba en verde y el usuario
+# fallaba recien en el `up`.
+# shellcheck disable=SC2317  # dobles de prueba: los invoca el chequeo
+hay_compose()  { return 0; }
+# shellcheck disable=SC2317
+falta_compose() { return 1; }
+
+COMPOSE_PROBE=hay_compose \
+  esperado 0 prereqs "con Compose v2 presente"   -- check_required_commands
+COMPOSE_PROBE=falta_compose \
+  esperado 1 prereqs "sin el plugin de Compose"  -- check_required_commands
+contiene 'docker-compose'  prereqs "aclara que el binario suelto no alcanza"
+contiene 'plugin'          prereqs "manda a instalar el plugin"
+
 # --- image-tag-conflict / project-collision ------------------------------
 #
 # Dos clones del repo en el mismo host se pisan en silencio: el tag de la

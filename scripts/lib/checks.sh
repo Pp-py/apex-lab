@@ -224,9 +224,33 @@ check_required_commands() {
     missing+=("sha256sum|shasum")
   fi
 
-  [[ ${#missing[@]} -eq 0 ]] || _fail "Faltan comandos: ${missing[*]}" || return 1
-  _ok "docker, curl, unzip y sha256sum disponibles"
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    _fail "Faltan comandos: ${missing[*]}" "instalalos y volve a correr"
+    return 1
+  fi
+
+  # Compose v2 aparte del binario `docker`.
+  #
+  # Todo el repo usa la forma `docker compose` —el subcomando del plugin v2—,
+  # pero este chequeo solo miraba `command -v docker`. Alguien con Docker y sin
+  # el plugin pasaba en verde y fallaba recien en el `up`, con un error que no
+  # lo mandaba a instalar nada. Y el reflejo de instalar `docker-compose` suelto
+  # NO lo arregla: ese es el v1, que no entiende este compose.yml.
+  #
+  # `${COMPOSE_PROBE}` para que el self-test simule su ausencia sin depender de
+  # lo que haya instalado en la maquina, igual que las sondas de ports-free.
+  if ! "${COMPOSE_PROBE:-_docker_compose_v2}"; then
+    _fail "Esta docker, pero no el plugin de Compose v2: \`docker compose\` no
+   responde. Instalar el paquete \`docker-compose\` suelto no alcanza —ese es
+   el v1 y no entiende este compose.yml—: hace falta el plugin." \
+      "instalar docker-compose-plugin (o Docker Desktop, que ya lo trae)"
+    return 1
+  fi
+  _ok "docker con Compose v2, curl, unzip y sha256sum disponibles"
 }
+
+# Sonda real de Compose v2. Separada para poder reemplazarla en el self-test.
+_docker_compose_v2() { docker compose version >/dev/null 2>&1; }
 
 check_docker_daemon() {
   docker info >/dev/null 2>&1 \

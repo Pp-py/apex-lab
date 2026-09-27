@@ -12,6 +12,30 @@ cada vez que sale una versión nueva; después, cada proyecto arranca en segundo
 
 ---
 
+## Requisitos
+
+| | |
+|---|---|
+| **Docker Engine con Compose v2** | El subcomando `docker compose`, no el binario viejo `docker-compose`. Validado en Docker 29.7.2 / Compose 5.5.0 |
+| **`curl`, `unzip`** | Descargan y extraen el instalador de APEX |
+| **`sha256sum` o `shasum`** | Verifica el instalador. Cualquiera de los dos sirve |
+| **~20 GB** donde Docker guarda sus imágenes | La base son 11,6 GB y la capa de APEX agrega ~4,7 |
+| **1,5 GB** junto al repo | Cache del instalador (`cache/`), se re-descarga solo si lo borrás |
+| **~4,5 GB por proyecto** | El volumen con los datafiles. Cada proyecto tiene el suyo |
+| **~2,5 GB de RAM** con el stack arriba | Medido en reposo: base 1,5 GiB + ORDS 860 MiB + Mailpit 25 MiB |
+
+**`shm_size: 2gb` no es opcional.** La SGA de Oracle vive en `/dev/shm`; con los
+64 MB que Docker da por defecto la base no arranca (`ORA-00845`). Ya está en
+`compose.yml`, pero si armás tu propio `docker run`, acordate.
+
+Validado en Linux y en WSL2 (Ubuntu 24.04). En Docker Desktop, con montajes
+lentos, el primer `up` puede tardar bastante más que los segundos medidos acá.
+
+Nada de esto hay que verificarlo a mano: **`./doctor.sh` lo chequea** —`prereqs`
+y `free-space`— y te dice qué falta.
+
+---
+
 ## Arranque rápido
 
 ```bash
