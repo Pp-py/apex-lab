@@ -391,6 +391,10 @@ main() {
   validate_profile
   validate_passwords
   check_prereqs
+  # Antes de los 7 minutos de build: si el tag destino lo usan contenedores de
+  # otro clon, construir se los re-etiqueta en silencio. Ver checks.sh.
+  check_image_tag_conflict "${IMAGE_NAME}:${IMAGE_TAG}" "${SCRIPT_DIR}" \
+    || die "${CHECK_DETAIL}"$'\n'"   -> ${CHECK_FIX}"
   sync_env
   seed_init_dir
   fetch_apex

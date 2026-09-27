@@ -197,6 +197,33 @@ $(printf '       %s\n' "${ocupados[@]}")
   _ok "los tres puertos estan libres o ya son de este proyecto"
 }
 
+# El COMPOSE_PROJECT_NAME por defecto es el mismo en todos los clones, y
+# compose arma los nombres de contenedor a partir de el. En un host donde ya
+# corre otro clon, tu .env recien generado **ya apunta, por nombre, al stack
+# ajeno** — antes de que toques docker compose para nada. Un `up`, un `down` o
+# un `down -v` desde acá operan sobre los contenedores y el volumen de otro.
+#
+# No hay error que lo delate: compose hace exactamente lo que le pediste.
+check_project_collision() {
+  local ajenos=() c dir
+  while read -r c; do
+    [[ -n "${c}" ]] || continue
+    dir="$(_compose_workdir_de "${c}")"
+    [[ -n "${dir}" && "${dir}" != "${SCRIPT_DIR}" ]] && ajenos+=("${c} (de ${dir})")
+  done < <(_compose ps -a --format '{{.Name}}' || true)
+
+  if [[ ${#ajenos[@]} -gt 0 ]]; then
+    _fail "El proyecto '${RT_PROJECT}' ya existe en este Docker, creado desde OTRO
+   directorio:
+$(printf '       %s\n' "${ajenos[@]}")
+   Tu .env apunta a esos contenedores por nombre. Un \`down -v\` desde aca le
+   borra la base a ese proyecto, no a vos." \
+      "sed -i 's/^COMPOSE_PROJECT_NAME=.*/COMPOSE_PROJECT_NAME=<otro>/' ${ENV_FILE}"
+    return 1
+  fi
+  _ok "el proyecto '${RT_PROJECT}' es de este directorio"
+}
+
 check_containers_health() {
   local ps_out
   ps_out="$(_compose ps --format '{{.Service}} {{.State}} {{.Health}}' || true)"
@@ -518,6 +545,7 @@ runtime_checks() {
     run_check docker-daemon check_docker_daemon
     return 0
   fi
+  run_check project-collision  check_project_collision
   run_check ports-free         check_ports_free "${ENV_FILE}"
   run_check containers-health  check_containers_health
   run_check db-shm-runtime     check_db_shm_runtime

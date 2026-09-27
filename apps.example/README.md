@@ -33,12 +33,14 @@ apps/
 APP_ID=100
 ALIAS=ux-pattern-catalog        # el nombre de carpeta que genera el export
 
-docker exec -i apexlab-ords bash -c "
+ORDS=$(docker compose ps -q ords)   # el nombre sale de COMPOSE_PROJECT_NAME
+
+docker exec -i "$ORDS" bash -c "
   rm -rf /tmp/apexlang && mkdir -p /tmp/apexlang && cd /tmp/apexlang
   echo -e 'apex export -applicationid ${APP_ID} -exptype APEXLANG\nexit' \
     | sql -s \$APP_SCHEMA/\$APP_PASSWORD@db:1521/FREEPDB1"
 
-mkdir -p apps && docker cp apexlab-ords:/tmp/apexlang/${ALIAS} apps/${ALIAS}
+mkdir -p apps && docker cp "$ORDS":/tmp/apexlang/${ALIAS} apps/${ALIAS}
 ```
 
 Dentro del contenedor de ORDS la base se llama `db` (el nombre del servicio en

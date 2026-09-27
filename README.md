@@ -18,10 +18,15 @@ cada vez que sale una versión nueva; después, cada proyecto arranca en segundo
 git clone <tu-repo> apex-lab && cd apex-lab
 
 ./build.sh              # ~7 min en una máquina rápida, una sola vez por versión
-./doctor.sh             # 30 chequeos; con el stack abajo avisa si falta algo
+./doctor.sh             # 31 chequeos; con el stack abajo avisa si falta algo
 docker compose up -d    # copia los datafiles al volumen; suele tardar segundos
 ./doctor.sh             # y que todo quedó sano después
 ```
+
+**`docker compose up -d` vuelve antes de que el Builder responda.** El `up`
+tarda segundos, pero ORDS necesita entre 20 s y un minuto más para atender. Si
+el `doctor.sh` de arriba te da `[SKIP]` en `builder-http` y `ords-statics-http`,
+no está roto: esperá un poco y volvé a correrlo.
 
 No hace falta copiar el `.env`: `build.sh` lo genera desde `.env.example` con
 los valores de `versions.env` ya resueltos, y en cada corrida posterior verifica
@@ -164,12 +169,16 @@ con un archivo por componente, en vez de un único `f100.sql` de
 más.
 
 ```bash
-docker exec -i apexlab-ords bash -c '
+# El nombre del contenedor sale de tu COMPOSE_PROJECT_NAME, no es fijo:
+# escribirlo a mano manda el export al ORDS de otro proyecto si lo tenés.
+ORDS=$(docker compose ps -q ords)
+
+docker exec -i "$ORDS" bash -c '
   rm -rf /tmp/apexlang && mkdir -p /tmp/apexlang && cd /tmp/apexlang
   echo -e "apex export -applicationid 100 -exptype APEXLANG\nexit" \
     | sql -s $APP_SCHEMA/$APP_PASSWORD@db:1521/FREEPDB1'
 
-mkdir -p apps && docker cp apexlab-ords:/tmp/apexlang/<alias> apps/<alias>
+mkdir -p apps && docker cp "$ORDS":/tmp/apexlang/<alias> apps/<alias>
 ```
 
 Ojo con un detalle que no se adivina: **SQLcl está en el contenedor de ORDS, no
@@ -185,10 +194,10 @@ Que lo exportado **vuelva a entrar** lo comprueba
 ## Diagnóstico: `./doctor.sh`
 
 Todo lo que este README documenta como "problema frecuente" está también
-ejecutable. `./doctor.sh` corre 30 chequeos y explica cada hallazgo:
+ejecutable. `./doctor.sh` corre 31 chequeos y explica cada hallazgo:
 
 ```bash
-./doctor.sh              # completo; 13 hablan con Docker
+./doctor.sh              # completo; 14 hablan con Docker
 ./doctor.sh --static     # solo lo que no necesita Docker; es lo que corre en CI
 ./doctor.sh --help       # incluye qué queda deliberadamente fuera y por qué
 ```
@@ -210,7 +219,7 @@ tomar una herramienta de diagnóstico.
 Sale con **0** si está todo bien, **2** si hay avisos y **1** si hay algo roto.
 
 Corre igual en este repo y en un directorio de proyecto. Allá no existen
-`versions.env` ni `sql/`, así que los seis chequeos que dependen de eso se
+`versions.env` ni `sql/`, así que los siete chequeos que dependen de eso se
 reportan como `[SKIP]` **con el motivo, nunca como `[OK]`**: un chequeo que no
 se pudo hacer no es un chequeo que pasó. Por la misma razón, un clon recién
 hecho —sin `.env`, sin `init/`, sin `cache/`— sale 0 y no una pared de rojo.
@@ -469,7 +478,7 @@ La última columna es el chequeo de `./doctor.sh` que lo detecta, y mantenerla
 es lo que hace visible la deriva entre esta tabla y la herramienta: **una fila
 sin chequeo es una oportunidad**.
 
-Al revés no vale: esto es un índice de síntomas, no el catálogo de los 29
+Al revés no vale: esto es un índice de síntomas, no el catálogo de los 31
 chequeos. La mayoría son preventivos —`env-drift`, `sql-ascii`, `bind-addr`,
 `prereqs`— y corren *antes* de que exista un síntoma que buscar acá. El
 catálogo completo lo imprime `./doctor.sh`.
@@ -478,6 +487,7 @@ catálogo completo lo imprime `./doctor.sh`.
 |---|---|---|
 | `ORA-00845` o la base no arranca | Falta `shm_size: 2gb` / `--shm-size=2g` | `compose-shm`, `db-shm-runtime` |
 | `docker compose up` falla con `port is already allocated` | Otro stack ya tiene 1521, 8080 u 8025. Se cambian en el `.env`, sin rebuild | `ports-free` |
+| Dos clones del repo en la misma máquina se pisan sin dar error | El tag de la imagen y el `COMPOSE_PROJECT_NAME` son globales al Docker del host, no por clon | `project-collision`, y `./build.sh` aborta antes de construir |
 | APEX carga sin estilos, todo texto plano | El montaje de `./cache/apex` en ORDS no está o quedó vacío | `ords-static-mount`, `ords-statics-http` |
 | `ORA-29273` (con `ORA-24247` adentro) desde tu propio PL/SQL | El build otorga ACLs a APEX, no al esquema de tu app. Receta en `init.example/README.md` | `app-acl` |
 | `ORA-24247` desde una REST Data Source de APEX | Faltan las ACLs del engine (`sql/20_network_acl.sql`) | `engine-acl` |

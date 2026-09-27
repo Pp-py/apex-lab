@@ -82,6 +82,59 @@ _warn() { CHECK_DETAIL="$1";     CHECK_FIX="${2:-}";  return 2; }
 _skip() { CHECK_DETAIL="$1";     CHECK_FIX="";        return 3; }
 
 # ---------------------------------------------------------------------------
+# Colisiones entre clones en el mismo host Docker
+#
+# El nombre de la imagen sale de versions.env y es GLOBAL al demonio de Docker:
+# dos clones de este repo en la misma maquina producen el mismo tag. El
+# `docker commit` del segundo re-etiqueta la imagen del primero **sin un solo
+# aviso**, y los contenedores que ya corren sobre ella quedan apuntando a un
+# ID que ya nadie nombra.
+#
+# Lo encontro alguien evaluando el repo por primera vez, comparando a mano
+# `docker images` contra versions.env antes de construir. El repo no lo decia
+# en ningun lado: "Un proyecto nuevo" aisla compose, puertos y nombre de
+# proyecto, pero da por sentado que todos los proyectos COMPARTEN la imagen, asi
+# que ni siquiera contempla dos builds independientes en un mismo host.
+# ---------------------------------------------------------------------------
+
+# De que directorio salio el proyecto compose de un contenedor. Vacio si no es
+# de compose o si Docker no contesta.
+_compose_workdir_de() {
+  docker inspect "$1" \
+    --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' 2>/dev/null
+}
+
+# check_image_tag_conflict <tag> <dir-de-este-repo>
+#
+# Lo corre build.sh ANTES de construir: 7 minutos despues seria tarde.
+check_image_tag_conflict() {
+  local tag="$1" repo="$2"
+  command -v docker >/dev/null 2>&1 || _skip "sin docker" || return 3
+  docker image inspect "${tag}" >/dev/null 2>&1 \
+    || _ok "el tag ${tag} esta libre" || return 0
+
+  # El tag existe. Solo molesta si lo usan contenedores de OTRO directorio:
+  # re-etiquetar sobre el tuyo propio es exactamente lo que queres al rehornear.
+  local ajenos=() c dir
+  while read -r c; do
+    [[ -n "${c}" ]] || continue
+    dir="$(_compose_workdir_de "${c}")"
+    [[ -n "${dir}" && "${dir}" != "${repo}" ]] && ajenos+=("${c} (de ${dir})")
+  done < <(docker ps -a --filter "ancestor=${tag}" --format '{{.Names}}' 2>/dev/null)
+
+  if [[ ${#ajenos[@]} -gt 0 ]]; then
+    _fail "El tag ${tag} ya lo usan contenedores de OTRO clon de este repo:
+$(printf '       %s\n' "${ajenos[@]}")
+   Construir acá le re-etiqueta la imagen a ese proyecto y no avisa: sus
+   contenedores quedan sobre un ID que ya nadie nombra. El nombre de la imagen
+   es global al demonio de Docker, no por proyecto." \
+      "cambiá IMAGE_NAME en versions.env (p.ej. IMAGE_NAME=\"apex-lab-\$(basename \"${repo}\")\")"
+    return 1
+  fi
+  _ok "el tag ${tag} no lo usa ningun otro proyecto"
+}
+
+# ---------------------------------------------------------------------------
 # Lectura de .env
 # ---------------------------------------------------------------------------
 

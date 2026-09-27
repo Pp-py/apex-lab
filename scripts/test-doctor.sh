@@ -55,6 +55,17 @@ esperado() {
   fi
 }
 
+# contiene <texto> <id> <desc> — verifica el MENSAJE, no solo el codigo.
+contiene() {
+  local aguja="$1" id="$2" desc="$3"
+  if [[ "${CHECK_DETAIL}${CHECK_FIX}" == *"${aguja}"* ]]; then
+    N_PASS=$((N_PASS+1)); printf '  %sok%s    %-24s %s\n' "${C_G}" "${C_0}" "${id}" "${desc}"
+  else
+    N_FAIL=$((N_FAIL+1))
+    printf '  %sFALLO%s %-24s %s  (no menciona "%s")\n' "${C_R}" "${C_0}" "${id}" "${desc}" "${aguja}"
+  fi
+}
+
 env_con() { printf '%s\n' "$@" > "${TMP}/env"; printf '%s' "${TMP}/env"; }
 
 printf '\nChequeos estaticos (0=OK 1=FAIL 2=WARN 3=SKIP)\n\n'
@@ -73,6 +84,42 @@ mkdir -p "${TMP}/init_doc" && : > "${TMP}/init_doc/01.sh" && : > "${TMP}/init_do
 esperado 1 init-inert-example "detecta el .sh.example colgado" -- check_init_inert "${TMP}/init_ej"
 esperado 2 init-inert-example "avisa de otras extensiones"     -- check_init_inert "${TMP}/init_otro"
 esperado 0 init-inert-example "el README.md no molesta"        -- check_init_inert "${TMP}/init_doc"
+
+# --- image-tag-conflict / project-collision ------------------------------
+#
+# Dos clones del repo en el mismo host se pisan en silencio: el tag de la
+# imagen y el COMPOSE_PROJECT_NAME son globales al demonio de Docker. Lo que se
+# prueba acá es la decision, con el lector de labels de compose reemplazado.
+# Los dobles llevan `shellcheck disable=SC2317` uno por uno: los invoca el
+# chequeo, no este archivo, y shellcheck no puede ver esa llamada indirecta.
+# `_compose` y `_compose_workdir_de` se redefinen en el lugar —sin delegar en
+# otra funcion— porque una indirección acá le parece codigo muerto a shellcheck.
+# shellcheck disable=SC2317
+_compose() { printf 'apexlab-db\n'; }
+
+# Con el tag inexistente no hay nada que chequear.
+esperado 0 image-tag "un tag que no existe esta libre" \
+  -- check_image_tag_conflict "apex-lab-inexistente:0" "${REPO}"
+
+# shellcheck disable=SC2317
+_compose_workdir_de() { printf '/home/otro/apex-lab'; }
+SCRIPT_DIR="${REPO}" RT_PROJECT="apexlab" ENV_FILE="${TMP}/env" \
+  esperado 1 project-collision "contenedores de otro clon: FAIL" -- check_project_collision
+contiene 'OTRO'        project-collision "dice que son de otro directorio"
+contiene '/home/otro'  project-collision "nombra el directorio ajeno"
+contiene 'down -v'     project-collision "advierte que un down -v borra lo ajeno"
+
+# shellcheck disable=SC2317
+_compose_workdir_de() { printf '%s' "${REPO}"; }
+SCRIPT_DIR="${REPO}" RT_PROJECT="apexlab" ENV_FILE="${TMP}/env" \
+  esperado 0 project-collision "contenedores propios: OK" -- check_project_collision
+
+# shellcheck disable=SC2317
+_compose_workdir_de() { printf ''; }
+SCRIPT_DIR="${REPO}" RT_PROJECT="apexlab" ENV_FILE="${TMP}/env" \
+  esperado 0 project-collision "algo que no es de compose no cuenta" -- check_project_collision
+
+unset -f _compose _compose_workdir_de
 
 # --- ports-free ----------------------------------------------------------
 #

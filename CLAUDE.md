@@ -26,7 +26,7 @@ docker compose up -d    # copia los datafiles al volumen (~4,5 GB), segundos
 docker compose down     # conserva los datos
 docker compose down -v  # destruye la base
 
-./doctor.sh             # 30 chequeos; read-only, imprime el comando y no lo corre
+./doctor.sh             # 31 chequeos; read-only, imprime el comando y no lo corre
 ./doctor.sh --static    # solo los que no necesitan Docker (los que corren en CI)
 ./scripts/test-doctor.sh  # self-test del doctor contra fixtures rotas
 
