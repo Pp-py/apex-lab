@@ -1,0 +1,102 @@
+name: Algo no funciona
+description: El build falla, el stack no levanta, o algo se comporta distinto de lo documentado.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Antes que nada: **corré `./doctor.sh`**. Son 31 chequeos y hay buenas
+        chances de que te diga qué pasa y cómo arreglarlo sin necesidad de abrir
+        esto. La tabla [Problemas frecuentes](https://github.com/Pp-py/apex-lab#problemas-frecuentes) del
+        README mapea cada síntoma con el chequeo que lo detecta.
+
+        > **No pegues tu `.env`**: tiene contraseñas. La salida de `./doctor.sh`
+        > no las incluye, por eso es lo que pedimos.
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Salida de `./doctor.sh`
+      description: >-
+        Entera, sin recortar: es lo primero que se va a mirar. Pegala entre
+        tres backticks para que se lea alineada.
+      placeholder: |
+        ```
+        [apex-lab doctor] modo repo  ·  /home/vos/apex-lab
+        ...
+        ```
+    validations:
+      required: true
+
+  - type: dropdown
+    id: etapa
+    attributes:
+      label: ¿En qué etapa aparece?
+      options:
+        - "./build.sh"
+        - "docker compose up -d"
+        - "./doctor.sh (reporta algo que no entiendo)"
+        - "./scripts/apex-roundtrip.sh"
+        - "Un proyecto derivado"
+        - "Usando APEX ya levantado"
+        - Otra
+    validations:
+      required: true
+
+  - type: textarea
+    id: esperado
+    attributes:
+      label: Qué esperabas y qué pasó
+      description: Si hay un error, pegalo literal. El texto exacto importa más que la descripción.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproducir
+    attributes:
+      label: Cómo reproducirlo
+      description: Los comandos que corriste, en orden, desde el `git clone`.
+      value: |
+        1. 
+        2. 
+        3. 
+    validations:
+      required: true
+
+  - type: textarea
+    id: entorno
+    attributes:
+      label: Entorno
+      description: "Pegá la salida de: `docker --version; docker compose version --short; uname -a`"
+      placeholder: |
+        Docker version 29.7.2, build a7dcaa6
+        5.5.0
+        Linux ... x86_64 GNU/Linux
+    validations:
+      required: true
+
+  - type: dropdown
+    id: plataforma
+    attributes:
+      label: Dónde corre Docker
+      description: Solo están validados Linux y WSL2; el resto puede tener diferencias reales.
+      options:
+        - Linux
+        - WSL2
+        - Docker Desktop (Windows)
+        - Docker Desktop (macOS)
+        - Otro
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: previos
+    attributes:
+      label: Antes de enviar
+      options:
+        - label: Corrí `./doctor.sh` y pegué su salida arriba
+          required: true
+        - label: Miré la tabla "Problemas frecuentes" del README
+          required: true
+        - label: No hay contraseñas ni datos privados en lo que pegué
+          required: true

@@ -1,0 +1,11 @@
+# Los issues de "Actualizaciones upstream disponibles" los abre y los cierra
+# solo el workflow check-upstream.yml. No hay plantilla para esos a proposito:
+# si abris uno a mano, el workflow no lo va a encontrar como propio.
+blank_issues_enabled: true
+contact_links:
+  - name: Antes de abrir un issue, corré ./doctor.sh
+    url: https://github.com/Pp-py/apex-lab#diagnóstico-doctorsh
+    about: 31 chequeos que nombran el problema y el comando que lo arregla. Resuelve la mayoría de los casos.
+  - name: Problemas frecuentes
+    url: https://github.com/Pp-py/apex-lab#problemas-frecuentes
+    about: Cada síntoma conocido con su causa y el chequeo que lo detecta.
