@@ -349,7 +349,19 @@ prerequisito sin cumplir (stack abajo, o el ID destino es de otra app).
    y base ≥ 23.26.0. Cada release puede cambiar esos mínimos.
 3. `rm -rf cache/apex` → el instalador viejo queda en cache.
 4. `./build.sh` → imprime el SHA256 nuevo; pegarlo en `versions.env` y commitear.
-5. Etiquetar el commit: `git tag apex-26.1 && git push --tags`.
+5. Etiquetar el commit: `git tag apex-<version> && git push origin apex-<version>`.
+
+### Los dos esquemas de tag, y por qué hacen falta los dos
+
+Responden preguntas distintas, así que conviven sobre el mismo commit:
+
+| Tag | Responde |
+|---|---|
+| `apex-26.1` | **Qué hay adentro de la imagen.** Se mueve cuando sube APEX |
+| `v0.1.0` | **En qué estado está el tooling** —`build.sh`, `doctor.sh`, el round-trip—. Se mueve cuando cambia el repo, aunque APEX siga igual |
+
+Sin el segundo no hay forma de etiquetar un arreglo del `doctor.sh` que no toque
+APEX: el `apex-26.1` ya estaría usado.
 
 El workflow `check-upstream.yml` corre mensualmente y abre un issue cuando
 aparece una versión nueva, para que no dependa de acordarte.
