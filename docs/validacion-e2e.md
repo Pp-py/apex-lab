@@ -12,6 +12,12 @@ está registrado en [Revalidación sobre 23.26.3](#revalidación-sobre-23263). E
 completo, volumen nuevo— para probar de paso `doctor.sh` y el round-trip de
 APEXlang: [Corrida desde cero del 25/09/2026](#corrida-desde-cero-del-25092026).
 
+La **corrida de referencia hoy es la del 27/09/2026**, y es la única que no la
+hizo quien escribió el repo: la ejecutó alguien sin conocimiento del proyecto,
+guiado solo por el README. Es la que cita el README y la que destapó lo que las
+otras tres tapaban:
+[Evaluación a ciegas del 27/09/2026](#evaluación-a-ciegas-del-27092026).
+
 ## Resultado
 
 | Punto | Estado | Cómo se verificó |
@@ -213,6 +219,73 @@ que bastaba con commitear para que el correo saliera. No basta —entrega un job
 del scheduler, cada 5 minutos— y seguir esa nota lleva a concluir que el SMTP
 está roto cuando funciona. Está reescrita en
 [Dos trampas al verificar](#dos-trampas-al-verificar-no-del-entorno).
+
+## Evaluación a ciegas del 27/09/2026
+
+La diferencia con las tres corridas anteriores no es el método sino **quién la
+hizo**: alguien sin ningún conocimiento del proyecto, guiado **solo por el
+README** y los documentos que el README enlaza, sin acceso a `CLAUDE.md` —que
+es donde están escritas todas las trampas—. Clonó, construyó y levantó todo
+desde cero en una máquina que ya tenía otro stack corriendo.
+
+| Etapa | Resultado |
+|---|---|
+| `./build.sh` | ✅ 6 m 56 s, `exit 0`, imagen de 16,3 GB |
+| `docker compose up -d` | ✅ 17 s |
+| `./doctor.sh` | ✅ 0 `FAIL` |
+| Round-trip APEXlang | ✅ PASS con la app generada (22 s) y con un export real (19 s) |
+| Proyecto derivado | ✅ PASS, `up` en 16 s sin rebuild |
+
+### Lo que encontró, y por qué se nos había escapado
+
+**Dos clones en la misma máquina se pisan en silencio**, por dos caminos, y
+ninguno emite un error:
+
+1. **El nombre de la imagen es global al demonio de Docker.** Sale de
+   `versions.env` y no se aísla por proyecto: el `docker commit` del segundo
+   clon re-etiqueta la imagen del primero, y los contenedores que ya corrían
+   sobre ella quedan apuntando a un ID que ya nadie nombra. «Un proyecto nuevo»
+   aísla compose, puertos y nombre de proyecto, pero **da por sentado que todos
+   los proyectos comparten la imagen**: no contempla dos builds independientes.
+2. **El `COMPOSE_PROJECT_NAME` por defecto es el mismo en todos los clones**, y
+   `compose.yml` arma los nombres de contenedor con él. En un host donde ya
+   corre otro clon, el `.env` recién generado ya apunta al stack ajeno por
+   nombre, antes de tocar `docker compose`. Un `down -v` desde ahí le borra la
+   base al otro proyecto.
+
+**Por qué ninguna corrida anterior lo vio: todas lo enmascaraban.** Quien
+prueba su propio repo aísla por prudencia el tag y el nombre de proyecto —es lo
+que hicieron las corridas del 25/09 y las de este documento—, y esa prudencia
+tapa exactamente el bug. El evaluador no tenía por qué ser prudente: hizo lo
+que hace cualquiera, y lo vio de frente. Lo dedujo comparando `docker images`
+contra `versions.env` **antes** de construir, no porque el repo se lo dijera.
+
+Vigilados desde entonces por `project-collision` y por una guarda en `build.sh`
+que aborta antes de los siete minutos de build.
+
+### Tres errores del README que el mismo recorrido destapó
+
+- Decía «30 chequeos» en tres lugares y «los 29» en otro.
+- Decía que en modo proyecto se saltean «seis» chequeos. Son siete.
+- El comando de «Apps exportadas» hardcodeaba el contenedor `apexlab-ords`. El
+  nombre sale de `COMPOSE_PROJECT_NAME`: copiado tal cual en un host con otro
+  clon corriendo, el export se hacía **contra el ORDS ajeno**. El evaluador se
+  dio cuenta y no lo ejecutó.
+
+Y una omisión que le costó tiempo: **`docker compose up -d` vuelve antes de que
+el Builder atienda.** El `up` tarda segundos, pero ORDS necesita entre 20 s y un
+minuto más; sin saberlo, el `doctor.sh` siguiente da `[SKIP]` en dos chequeos y
+el entorno parece a medio arrancar.
+
+### Una lección sobre el método, no sobre el repo
+
+Durante la corrida se le avisó que su `build.sh` había muerto por SIGTERM. Era
+falso: `build.sh` hace `docker stop` antes del `docker commit`, y un
+`docker stop` **produce exit 143**. Es el camino exitoso, a propósito. El
+evaluador investigó, contradijo el aviso con evidencia —su log completo, el
+`exit 0`, la imagen ya creada— y decidió no repetir siete minutos de build.
+Tenía razón. **Un exit 143 en el contenedor de build es normal**, y conviene
+recordarlo antes de diagnosticar un build fallido que no falló.
 
 ## Bugs que la corrida destapó
 

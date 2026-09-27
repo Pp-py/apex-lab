@@ -504,17 +504,41 @@ catálogo completo lo imprime `./doctor.sh`.
 
 ## Estado
 
-**Validado end-to-end el 26/08/2026** sobre Docker 29.7.2 en WSL2 (Ubuntu 24.04):
-build limpio en 6 m 58 s, APEX 26.1 `VALID` con 0 objetos inválidos, el Builder
-sirviendo sus estáticos, correo cayendo en Mailpit y las ACLs de red
-funcionando desde un esquema de aplicación.
+**Validado end-to-end el 27/09/2026**, y de una forma distinta a las corridas
+anteriores: en vez de ejecutarlo quien escribió el repo, lo levantó desde cero
+alguien que no lo conocía, guiándose **solo por este README**. Entorno: Docker
+29.7.2 sobre WSL2 (Ubuntu 24.04).
 
-**Revalidado el 03/09/2026** al subir la base a 23.26.3: la corrida pasó
-completa y sin bugs nuevos. Detalle en
-[`docs/validacion-e2e.md`](docs/validacion-e2e.md). Tené en cuenta que subir la
-versión de la base **obliga a `docker compose down -v`**: el volumen guarda los
+| Etapa | Resultado |
+|---|---|
+| `./build.sh` desde un clon limpio | ✅ 6 m 56 s — el README promete «~7 min» |
+| `docker compose up -d` | ✅ 17 s |
+| `./doctor.sh` | ✅ todo en verde, 0 `FAIL` |
+| Round-trip de APEXlang | ✅ PASS, con la app generada **y** con un export real |
+| Proyecto derivado | ✅ PASS, reusando la imagen sin rebuild |
+
+Las cinco etapas completas, sin nada a medias.
+
+Encontró dos fallos que ninguna corrida anterior había visto, y la razón importa
+más que los fallos: **todas las anteriores los enmascaraban sin querer**. Quien
+prueba su propio repo aísla por prudencia el tag de la imagen y el nombre de
+proyecto, y eso tapa justo el problema de que **dos clones en la misma máquina
+se pisan en silencio** —uno re-etiqueta la imagen del otro, el otro opera sobre
+contenedores ajenos— sin que salte un solo error. Los vigilan
+`project-collision` y una guarda en `./build.sh` que aborta antes de construir.
+
+**Esas dos correcciones son posteriores a la corrida.** Tienen cobertura de
+self-test y se verificaron contra la colisión real, pero no volvieron a pasar
+por un build completo desde cero.
+
+El detalle de esta validación y de las anteriores está en
+[`docs/validacion-e2e.md`](docs/validacion-e2e.md).
+
+**Subir la versión de la base obliga a `docker compose down -v`.** No es parte
+de la validación sino una consecuencia del diseño: el volumen guarda los
 datafiles de la versión anterior y el faststart solo los copia cuando está
-vacío, así que conservarlo deja binarios nuevos sobre datafiles viejos.
+vacío, así que conservarlo deja binarios nuevos sobre datafiles viejos, sin el
+`datapatch` que corresponde.
 
 Lo único que sigue **sin ejercitar** es el perfil `oracle` de
 `scripts/base-profile.sh`, el plan B de la imagen oficial: es fallback, no el

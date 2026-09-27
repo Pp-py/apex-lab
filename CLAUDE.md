@@ -268,9 +268,12 @@ correo cayendo en Mailpit y ACLs funcionando. **Revalidado el 03/09/2026** sobre
 la base 23.26.3, sin bugs nuevos.
 
 **Repetido desde cero el 25/09/2026** en un sandbox aislado —clon desde el
-remoto, build entero (10 m 34 s), volumen nuevo—: `./doctor.sh` da 29/29 y
-`./scripts/apex-roundtrip.sh` PASS, también en modo proyecto. Destapó dos bugs
-de las herramientas nuevas, los dos ya corregidos.
+remoto, build entero (10 m 34 s), volumen nuevo—, y el **27/09/2026 lo levantó
+desde cero alguien sin conocimiento del proyecto, guiado solo por el README**:
+las cinco etapas completas, build en 6 m 56 s. Esa última corrida destapó que
+dos clones en la misma máquina se pisan en silencio —ver la sección de trampas—
+porque quien prueba su propio repo aísla por prudencia el tag y el nombre de
+proyecto, y esa prudencia tapaba el bug.
 
 **Subir la versión de la base obliga a `docker compose down -v`.** El volumen
 guarda los datafiles de la versión anterior y el faststart solo los copia cuando
