@@ -49,29 +49,36 @@ ${SQLPLUS_ENTER_PDB}
 SQL
 
 # ---------------------------------------------------------------------------
-# 2. Usuarios REST de APEX (APEX_LISTENER / APEX_REST_PUBLIC_USER)
+# 2. Usuarios REST de APEX (APEX_REST_PUBLIC_USER, y APEX_LISTENER hasta 26.1)
 #
 #    apex_rest_config.sql NO acepta las contraseñas como parámetros
-#    posicionales: su propia cabecera dice "You will be prompted to enter
-#    passwords for both users". Internamente despacha a apex_rest_config_nocdb.sql,
-#    que hace dos `accept ... HIDE` — primero APEX_LISTENER, después
-#    APEX_REST_PUBLIC_USER.
+#    posicionales: pide cada una con un `accept ... HIDE`. Internamente
+#    despacha a apex_rest_config_nocdb.sql, que es donde están los prompts.
 #
 #    Pasarlas como argumentos las ignora y el prompt se come el EOF del heredoc:
 #    el usuario queda creado con contraseña vacía y el build muere con un
 #    ORA-01741 (illegal zero-length identifier) que no menciona el prompt.
-#    Por eso van como DOS LÍNEAS de stdin, en ese orden, justo después del @.
+#    Por eso van como líneas de stdin, justo después del @.
 #
-#    Si una versión futura de APEX cambia la cantidad de prompts, esto se
-#    desalinea en silencio: el paso 5 verifica que ambos usuarios existan.
+#    La CANTIDAD de líneas se cuenta del propio instalador, no se fija acá:
+#    hasta 26.1 eran dos prompts (APEX_LISTENER y APEX_REST_PUBLIC_USER) y 26.2
+#    eliminó APEX_LISTENER y dejó uno. Con las dos líneas fijas de antes, la
+#    sobrante caía en SQL*Plus como comando (SP2-0042, que WHENEVER SQLERROR no
+#    atrapa) y la contraseña quedaba impresa en el log del build. Todos los
+#    prompts reciben la misma clave, así que el orden no importa.
 # ---------------------------------------------------------------------------
 log "Configurando usuarios REST de APEX"
+rest_prompts="$(grep -ciE '^[[:space:]]*accept[[:space:]]' "${APEX_HOME}/apex_rest_config_nocdb.sql" || true)"
+if [[ "${rest_prompts}" -lt 1 ]]; then
+  printf 'ERROR: apex_rest_config_nocdb.sql no tiene ningún accept; cambió el instalador.\n' >&2
+  exit 1
+fi
+log "apex_rest_config pide ${rest_prompts} contraseña(s)"
 sqlplus -s -L / as sysdba <<SQL
 ${SQLPLUS_HEADER}
 ${SQLPLUS_ENTER_PDB}
 @apex_rest_config.sql
-${APEX_PUBLIC_USER_PASSWORD}
-${APEX_PUBLIC_USER_PASSWORD}
+$(for ((i = 0; i < rest_prompts; i++)); do printf '%s\n' "${APEX_PUBLIC_USER_PASSWORD}"; done)
 SQL
 
 # ---------------------------------------------------------------------------

@@ -6,8 +6,8 @@ cada vez que sale una versión nueva; después, cada proyecto arranca en segundo
 | Componente | Versión | Cómo se actualiza |
 |---|---|---|
 | Oracle Database Free | 23.26.3 (`gvenzl/oracle-free`) | `versions.env` + `./build.sh` |
-| Oracle APEX | 26.1 | `versions.env` + `./build.sh` |
-| ORDS | 26.1.2 (imagen oficial) | solo cambiar el tag, sin rebuild |
+| Oracle APEX | 26.2 | `versions.env` + `./build.sh` |
+| ORDS | 26.3.0 (imagen oficial) | solo cambiar el tag, sin rebuild |
 | Mailpit | latest | — |
 
 ---
@@ -345,7 +345,7 @@ prerequisito sin cumplir (stack abajo, o el ID destino es de otra app).
 ## Actualizar versiones
 
 1. Editar `versions.env`: nuevo `DB_BASE_IMAGE` y/o `APEX_VERSION`, vaciar `APEX_SHA256`.
-2. **Revisar compatibilidad antes de correr nada.** APEX 26.1 exige ORDS ≥ 26.1.1
+2. **Revisar compatibilidad antes de correr nada.** APEX 26.2 exige ORDS ≥ 26.3.0, SQLcl ≥ 26.3.0
    y base ≥ 23.26.0. Cada release puede cambiar esos mínimos.
 3. `rm -rf cache/apex` → el instalador viejo queda en cache.
 4. `./build.sh` → imprime el SHA256 nuevo; pegarlo en `versions.env` y commitear.
@@ -362,6 +362,31 @@ Responden preguntas distintas, así que conviven sobre el mismo commit:
 
 Sin el segundo no hay forma de etiquetar un arreglo del `doctor.sh` que no toque
 APEX: el `apex-26.1` ya estaría usado.
+
+### Elegir una versión de APEX
+
+Cada tag `apex-*` es una suite completa: la receta, el ORDS y el tooling que se
+validaron juntos. Para quedarte en una versión anterior, cloná ese tag en vez de
+`main`:
+
+```bash
+git clone --branch apex-26.1 <url-del-repo> apex-lab-26.1
+cd apex-lab-26.1 && ./build.sh
+```
+
+| Tag | APEX | ORDS | SQLcl mínimo | Base mínima | Imagen que genera |
+|---|---|---|---|---|---|
+| `apex-26.2` | 26.2 | 26.3.0 | 26.3.0 ¹ | 23.26.0 | `apex-lab:db23.26.3-apex26.2` |
+| `apex-26.1` | 26.1 | 26.1.2 | — | 23.26.0 | `apex-lab:db23.26.3-apex26.1` |
+
+¹ La imagen `ords:26.3.0` trae SQLcl 26.1.2. El round-trip de APEXlang pasa
+igual (medido el 08/10/2026), pero está por debajo del mínimo que pide Oracle.
+
+Las dos imágenes pueden convivir en la misma máquina porque el tag de la imagen
+incluye la versión. Lo que **no** se puede hacer es cambiar de suite sobre el
+mismo volumen: el volumen guarda la base con la versión de APEX con la que se
+creó. Usá un `COMPOSE_PROJECT_NAME` distinto por suite, o hacé
+`docker compose down -v` (exportando antes tus apps) al cambiar.
 
 El workflow `check-upstream.yml` corre mensualmente y abre un issue cuando
 aparece una versión nueva, para que no dependa de acordarte.
