@@ -62,7 +62,7 @@ services:
   # ORDS oficial de Oracle. No se hornea: se actualiza cambiando el tag.
   # -------------------------------------------------------------------------
   ords:
-    image: container-registry.oracle.com/database/ords:${ORDS_TAG:-26.1.2}
+    image: container-registry.oracle.com/database/ords:${ORDS_TAG:-26.3.0}
     container_name: ${COMPOSE_PROJECT_NAME:-apexlab}-ords
     restart: unless-stopped
     depends_on:
@@ -73,7 +73,11 @@ services:
       DBPORT: 1521
       DBSERVICENAME: FREEPDB1
       ORACLE_PWD: ${ORACLE_PASSWORD:-oracle}
-      ORDS_PWD: ${ORACLE_PASSWORD:-oracle}
+      # Clave de ORDS_PUBLIC_USER. Hasta ORDS 26.2 el entrypoint la generaba al
+      # azar si faltaba; desde 26.3.0 es obligatoria y sin ella el contenedor
+      # entra en loop con "Required variable ORACLE_USER_PWD is missing".
+      # Reemplaza a ORDS_PWD, que ningun entrypoint (26.1 ni 26.3) leia.
+      ORACLE_USER_PWD: ${ORACLE_PASSWORD:-oracle}
       # SQLcl vive en ESTE contenedor, no en el de la base, y es lo que corre
       # `apex export`. Sin estas dos, el comando documentado en
       # apps.example/README.md conecta sin usuario y da ORA-01017.

@@ -301,19 +301,21 @@ check_apex_rest_users() {
                  WHERE username IN ('APEX_LISTENER','APEX_REST_PUBLIC_USER','APEX_PUBLIC_USER');")"
   [[ -n "${out}" ]] || _skip "no se pudo consultar la base" || return 3
 
-  local malos=() par cuantos
-  if [[ "${out}" == "NINGUNO" ]]; then
-    cuantos=0
-  else
-    cuantos="$(wc -w <<< "${out}")"
+  # APEX_LISTENER es opcional: APEX 26.2 lo elimino. Se exigen los otros dos y,
+  # si APEX_LISTENER existe (APEX <= 26.1), que tambien este OPEN.
+  local malos=() faltan=() par req
+  for req in APEX_PUBLIC_USER APEX_REST_PUBLIC_USER; do
+    [[ " ${out} " == *" ${req}="* ]] || faltan+=("${req}")
+  done
+  if [[ "${out}" != "NINGUNO" ]]; then
     for par in ${out}; do
       [[ "${par}" == *"=OPEN" ]] || malos+=("${par}")
     done
   fi
-  if [[ "${cuantos}" -ne 3 ]]; then
-    _fail "Solo ${cuantos} de los 3 usuarios REST de APEX existen: ${out}.
+  if [[ ${#faltan[@]} -gt 0 ]]; then
+    _fail "Faltan usuarios REST de APEX: ${faltan[*]} (encontrados: ${out}).
    apex_rest_config.sql pide las claves por prompt; si cambio la cantidad de
-   prompts, el build las desalinea en silencio." "rehornear la imagen: ./build.sh"
+   prompts, el build las desalinea." "rehornear la imagen: ./build.sh"
     return 1
   fi
   if [[ ${#malos[@]} -gt 0 ]]; then
@@ -321,7 +323,7 @@ check_apex_rest_users() {
       "ALTER USER <usuario> ACCOUNT UNLOCK;"
     return 1
   fi
-  _ok "APEX_LISTENER, APEX_REST_PUBLIC_USER y APEX_PUBLIC_USER OPEN"
+  _ok "usuarios REST de APEX OPEN: ${out}"
 }
 
 # ORA-28002: la contraseña expira meses despues y el entorno deja de abrir.
